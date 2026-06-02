@@ -84,10 +84,10 @@ export function AppShell({
   const showIndicator = pull > 0 || refreshing;
 
   return (
-    <div className="flex flex-col h-safe-screen">
+    <div className="flex flex-col" style={{ height: "100dvh" }}>
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto pb-32 pt-safe pl-safe pr-safe relative"
+        className="flex-1 min-h-0 overflow-y-auto pb-32 pt-safe pl-safe pr-safe relative"
         style={{ overscrollBehaviorY: onRefresh ? "contain" : undefined }}
       >
         {onRefresh && (

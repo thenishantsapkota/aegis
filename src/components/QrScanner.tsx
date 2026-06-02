@@ -3,6 +3,7 @@ import {
   BrowserQRCodeReader,
   type IScannerControls,
 } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { AlertTriangle, Camera, RefreshCcw } from "lucide-react";
 
 type Props = {
@@ -46,20 +47,36 @@ export function QrScanner({ onScan }: Props) {
     setStatus("requesting");
     try {
       controlsRef.current?.stop();
-      const reader =
-        readerRef.current ??
-        (readerRef.current = new BrowserQRCodeReader(undefined, {
-          delayBetweenScanAttempts: 200,
-        }));
+      // TRY_HARDER + QR-only hints help with dense QRs (e.g. Google
+      // Authenticator migration QRs that pack many accounts into one code).
+      const hints = new Map<DecodeHintType, unknown>();
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+      // Recreate the reader each start so hint changes always apply.
+      readerRef.current = new BrowserQRCodeReader(hints, {
+        delayBetweenScanAttempts: 120,
+      });
+      const reader = readerRef.current;
 
       // If we know the device id, pin to it. Otherwise ask for the
-      // back-facing camera and let the browser pick. decodeFromConstraints
-      // triggers the permission prompt itself — no need to pre-enumerate.
+      // back-facing camera and let the browser pick. Higher resolution +
+      // continuous autofocus make dense QRs detectable.
       const id = targetId === undefined ? deviceId : targetId;
+      const baseVideo: MediaTrackConstraints = {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        // Not all browsers expose focusMode; ignored where unsupported.
+        // @ts-expect-error: focusMode is non-standard but widely accepted
+        focusMode: { ideal: "continuous" },
+        frameRate: { ideal: 30 },
+      };
       const constraints: MediaStreamConstraints = id
-        ? { video: { deviceId: { exact: id } }, audio: false }
+        ? {
+            video: { ...baseVideo, deviceId: { exact: id } },
+            audio: false,
+          }
         : {
-            video: { facingMode: { ideal: "environment" } },
+            video: { ...baseVideo, facingMode: { ideal: "environment" } },
             audio: false,
           };
 

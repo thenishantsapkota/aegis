@@ -228,9 +228,11 @@ function ScanMigration() {
               {error}
             </div>
           )}
-          <p className="text-xs text-muted text-center">
+          <p className="text-xs text-muted text-center leading-relaxed">
             Google Authenticator may show several QR codes — scan each one;
-            Aegis will collect them.
+            Aegis will collect them. The migration QR is dense — hold your
+            phone <strong>steady</strong> and <strong>fill most of the
+            frame</strong> for a few seconds.
           </p>
           {entries.length > 0 && (
             <button

@@ -1,7 +1,13 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { ShieldCheck, KeyRound, AlertTriangle } from "lucide-react";
+import {
+  ShieldCheck,
+  KeyRound,
+  AlertTriangle,
+  CloudDownload,
+} from "lucide-react";
 import { useVault } from "~/lib/vault-context";
+import { isAppwriteConfigured } from "~/lib/appwrite";
 
 export const Route = createFileRoute("/setup")({
   component: SetupRoute,
@@ -113,6 +119,28 @@ function SetupRoute() {
             {busy ? "Creating vault…" : "Create vault"}
           </button>
         </form>
+
+        {isAppwriteConfigured() && (
+          <>
+            <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-[0.08em] text-muted">
+              <div className="flex-1 h-px bg-white/[0.08]" />
+              or
+              <div className="flex-1 h-px bg-white/[0.08]" />
+            </div>
+            <Link
+              to="/restore"
+              className="btn-ghost w-full"
+              aria-label="Sign in to existing account"
+            >
+              <CloudDownload size={18} />
+              Sign in to existing account
+            </Link>
+            <p className="text-xs text-muted text-center mt-3">
+              Already set up Aegis on another device? Sign in to pull your
+              codes here.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

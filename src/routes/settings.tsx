@@ -292,6 +292,7 @@ function SyncButton({
 }
 
 function CloudAuthForm({ onDone }: { onDone: () => void }) {
+  const { unlock } = useVault();
   const [mode, setMode] = useState<"signup" | "signin">("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -306,7 +307,11 @@ function CloudAuthForm({ onDone }: { onDone: () => void }) {
       if (mode === "signup") {
         await cloudSignUp(password, email);
       } else {
+        // Sign-in may have just replaced our local KDF/keyCheck with the
+        // cloud's. Re-derive the in-memory vault key against the new meta so
+        // entries decrypt correctly afterwards.
         await cloudSignInExisting(password, email);
+        await unlock(password);
       }
       onDone();
     } catch (err) {

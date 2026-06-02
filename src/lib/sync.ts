@@ -102,27 +102,117 @@ export async function cloudSignUp(
   return await pushLocalVault(vaultKey);
 }
 
+// Sign in on a device that already has a local vault. If the cloud has data,
+// we adopt it wholesale — replacing local entries/folders/KDF/keyCheck with the
+// cloud copy. This is what makes multi-device sync work: every device after
+// the first ends up with the same KDF as the device that pushed first, so
+// every device derives the same vault key and can decrypt the same blob.
+//
+// If the cloud has no data yet (rare — this is "sign in" not "sign up"), we
+// link the account and push the local vault up.
 export async function cloudSignInExisting(
   masterPassword: string,
   email: string,
 ): Promise<VaultMeta> {
   const meta = await getMeta();
   if (!meta) throw new Error("Initialize the local vault first.");
+
   const authPassword = await deriveAuthPassword(masterPassword, email);
   try {
     await safeCreateSession(email, authPassword);
   } catch (e) {
     throw normalizeError(e, "Sign-in failed");
   }
-  const user = await appwrite().account.get();
-  const updated: VaultMeta = {
+  const { account } = appwrite();
+  const user = await account.get();
+  const cloudRow = await getOrNullVaultRow(user.$id);
+
+  if (cloudRow) {
+    // Cloud has a vault — adopt it. Derive the key with the CLOUD'S KDF, not
+    // ours, so we can decrypt the blob that was encrypted by another device.
+    const cloudKdf: KdfParams = {
+      algorithm: "PBKDF2",
+      hash: "SHA-256",
+      iterations: cloudRow.vaultKdfIterations,
+      salt: cloudRow.vaultKdfSalt,
+    };
+    const vaultKey = await deriveVaultKey(
+      masterPassword,
+      cloudKdf,
+      VAULT_CONTEXT,
+    );
+    const wrapped = JSON.parse(atob(cloudRow.cipherText)) as EncryptedBlob;
+    let exportObj: unknown;
+    try {
+      exportObj = await decryptJSON<unknown>(vaultKey, wrapped);
+    } catch {
+      // Wrong master password — back out so the user can retry cleanly.
+      try {
+        await account.deleteSession("current");
+      } catch {
+        /* ignore */
+      }
+      throw new Error(
+        "Wrong master password for this cloud account. Use the same password you set up on your other device.",
+      );
+    }
+    if (!isEncryptedExport(exportObj)) {
+      throw new Error("Cloud data is in an unexpected format.");
+    }
+
+    await db().transaction(
+      "rw",
+      [db().folders, db().entries, db().meta],
+      async () => {
+        await db().folders.clear();
+        await db().entries.clear();
+        if (exportObj.folders.length)
+          await db().folders.bulkPut(exportObj.folders);
+        if (exportObj.entries.length)
+          await db().entries.bulkPut(exportObj.entries);
+        const adopted: VaultMeta = {
+          ...meta,
+          email,
+          userId: user.$id,
+          sessionToken: "appwrite",
+          kdf: exportObj.kdf,
+          keyCheck: exportObj.keyCheck,
+          remoteVersion: cloudRow.version,
+          lastSyncedAt: Date.now(),
+          // Biometric binding on this device wrapped the OLD vault key, so it
+          // can no longer unwrap correctly. Force re-enroll.
+          biometric: null,
+        };
+        await db().meta.put(adopted);
+      },
+    );
+    return (await getMeta())!;
+  }
+
+  // No cloud data — link the account and push the local vault.
+  const localKey = await deriveVaultKey(
+    masterPassword,
+    meta.kdf,
+    VAULT_CONTEXT,
+  );
+  if (!(await verifyKeyCheck(localKey, meta.keyCheck))) {
+    try {
+      await account.deleteSession("current");
+    } catch {
+      /* ignore */
+    }
+    throw new Error(
+      "Password doesn't match this device's local vault. Use the same master password.",
+    );
+  }
+  const linked: VaultMeta = {
     ...meta,
     email,
     userId: user.$id,
     sessionToken: "appwrite",
   };
-  await db().meta.put(updated);
-  return updated;
+  await db().meta.put(linked);
+  return await pushLocalVault(localKey);
 }
 
 // Sign in on a FRESH device (no local vault yet). We sign in to Appwrite,

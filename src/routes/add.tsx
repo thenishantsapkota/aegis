@@ -95,19 +95,22 @@ function ScanPane() {
         return;
       }
       const parsed = parseOtpauthUri(text);
-      await saveEntry({
-        folderId: null,
-        issuer: parsed.issuer,
-        account: parsed.account,
-        secret: {
-          secret: parsed.secret,
-          algorithm: parsed.algorithm,
-          digits: parsed.digits,
-          period: parsed.period,
-          type: parsed.type,
-          counter: parsed.counter,
+      await saveEntry(
+        {
+          folderId: null,
+          issuer: parsed.issuer,
+          account: parsed.account,
+          secret: {
+            secret: parsed.secret,
+            algorithm: parsed.algorithm,
+            digits: parsed.digits,
+            period: parsed.period,
+            type: parsed.type,
+            counter: parsed.counter,
+          },
         },
-      });
+        { immediateSync: true },
+      );
       navigate({ to: "/" });
     } catch (e) {
       setError(
@@ -188,12 +191,15 @@ function ManualPane() {
     };
     setBusy(true);
     try {
-      await saveEntry({
-        folderId: folderId || null,
-        issuer: issuer.trim(),
-        account: account.trim(),
-        secret: entrySecret,
-      });
+      await saveEntry(
+        {
+          folderId: folderId || null,
+          issuer: issuer.trim(),
+          account: account.trim(),
+          secret: entrySecret,
+        },
+        { immediateSync: true },
+      );
       navigate({ to: "/" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");

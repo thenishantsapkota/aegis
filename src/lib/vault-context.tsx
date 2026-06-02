@@ -60,15 +60,18 @@ type VaultCtx = {
   /** Wipes ALL local vault data after confirmation. */
   resetLocalVault: () => Promise<void>;
   /** Encrypt + persist an entry. */
-  saveEntry: (input: {
-    id?: string;
-    folderId: string | null;
-    issuer: string;
-    account: string;
-    iconHint?: string | null;
-    secret: EntrySecret;
-    sortOrder?: number;
-  }) => Promise<EntryRecord>;
+  saveEntry: (
+    input: {
+      id?: string;
+      folderId: string | null;
+      issuer: string;
+      account: string;
+      iconHint?: string | null;
+      secret: EntrySecret;
+      sortOrder?: number;
+    },
+    opts?: { immediateSync?: boolean },
+  ) => Promise<EntryRecord>;
   /** Delete an entry by id (triggers auto-sync). */
   deleteEntry: (id: string) => Promise<void>;
   /** Push local vault to cloud using the in-memory key. */
@@ -343,7 +346,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }, [backgroundPush]);
 
   const saveEntry = useCallback<VaultCtx["saveEntry"]>(
-    async (input) => {
+    async (input, opts) => {
       if (!keyRef.current) throw new Error("Vault is locked");
       const payload: EncryptedBlob = await encryptJSON(
         keyRef.current,
@@ -364,10 +367,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         updatedAt: now,
       };
       await db().entries.put(record);
-      scheduleSync();
+      if (opts?.immediateSync) {
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+        dirtyRef.current = 0;
+        void backgroundPush();
+      } else {
+        scheduleSync();
+      }
       return record;
     },
-    [scheduleSync],
+    [scheduleSync, backgroundPush],
   );
 
   const deleteEntry = useCallback<VaultCtx["deleteEntry"]>(

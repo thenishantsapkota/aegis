@@ -82,7 +82,7 @@ export function CodeCard({ entry, onEdit }: Props) {
     "?";
 
   return (
-    <div className="card p-4 flex items-center gap-4 transition-all duration-200 active:scale-[0.995] hover:[border-color:rgb(255_255_255/0.14)]">
+    <div className="card p-3 sm:p-4 flex items-center gap-3 sm:gap-4 transition-all duration-200 active:scale-[0.995] hover:[border-color:rgb(255_255_255/0.14)]">
       <div className="code-avatar">
         <span className="drop-shadow-sm">{initial}</span>
       </div>
@@ -96,7 +96,7 @@ export function CodeCard({ entry, onEdit }: Props) {
         <div className="text-[11px] text-muted truncate font-semibold uppercase tracking-[0.08em]">
           {entry.issuer || "—"}
         </div>
-        <div className="font-mono text-[28px] leading-tight font-semibold tracking-[0.04em] tabular-nums mt-0.5 group-active:text-gradient transition">
+        <div className="font-mono text-2xl sm:text-[28px] leading-tight font-semibold tracking-[0.04em] tabular-nums mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis group-active:text-gradient transition">
           {error ? (
             <span className="text-danger text-sm">{error}</span>
           ) : (
@@ -108,9 +108,14 @@ export function CodeCard({ entry, onEdit }: Props) {
         </div>
       </button>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         {ringProps && (
-          <svg width="40" height="40" viewBox="0 0 40 40" className="shrink-0">
+          <svg
+            width="36"
+            height="36"
+            viewBox="0 0 40 40"
+            className="shrink-0 sm:w-10 sm:h-10"
+          >
             <defs>
               <linearGradient
                 id={`ring-${entry.id}`}
@@ -166,7 +171,7 @@ export function CodeCard({ entry, onEdit }: Props) {
           type="button"
           onClick={copyCode}
           className={cn(
-            "w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-150",
+            "w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center transition-all duration-150",
             copied
               ? "bg-success/15 text-success border border-success/30"
               : "bg-white/[0.04] text-muted border border-white/[0.08] hover:bg-white/[0.08] hover:text-white",
@@ -179,7 +184,7 @@ export function CodeCard({ entry, onEdit }: Props) {
           <button
             type="button"
             onClick={() => onEdit(entry)}
-            className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white hover:bg-white/[0.08] transition-all"
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white hover:bg-white/[0.08] transition-all"
             aria-label="More"
           >
             <MoreHorizontal size={16} />

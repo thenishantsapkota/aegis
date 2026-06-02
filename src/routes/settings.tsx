@@ -29,8 +29,6 @@ import {
   cloudSignInExisting,
   cloudSignOut,
   cloudSignUp,
-  pullRemoteVault,
-  pushLocalVault,
 } from "~/lib/sync";
 import { isAppwriteConfigured } from "~/lib/appwrite";
 import { deriveVaultKey } from "~/lib/crypto";
@@ -157,6 +155,7 @@ function BiometricSection() {
 }
 
 function CloudSyncSection() {
+  const { pushNow, pullNow } = useVault();
   const [meta, setMeta] = useState<Awaited<ReturnType<typeof getMeta>>>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -210,8 +209,7 @@ function CloudSyncSection() {
                 setError(null);
                 setBusy("push");
                 try {
-                  const key = await ensureVaultKey();
-                  await pushLocalVault(key);
+                  await pushNow();
                   await refresh();
                 } catch (e) {
                   setError(e instanceof Error ? e.message : "Push failed");
@@ -228,9 +226,8 @@ function CloudSyncSection() {
                 setError(null);
                 setBusy("pull");
                 try {
-                  const key = await ensureVaultKey();
-                  const res = await pullRemoteVault(key);
-                  if (!res.applied) setError("Nothing on the server yet.");
+                  const applied = await pullNow();
+                  if (!applied) setError("Nothing on the server yet.");
                   await refresh();
                 } catch (e) {
                   setError(e instanceof Error ? e.message : "Pull failed");
@@ -374,30 +371,8 @@ function CloudAuthForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-// Re-derive the vault key from the user's password without storing it.
-// We prompt the user for their password since the key is held only in-memory in
-// the VaultProvider; for sync we need to expose a helper. Simplest secure way:
-// ask once per session for sync ops. (Vault context already holds key but for
-// minimal coupling we re-derive here using the stored kdf + a password prompt.)
-async function ensureVaultKey(): Promise<CryptoKey> {
-  // The vault context holds the key in a ref, but we don't expose it directly.
-  // Workaround: encrypt the same way through context isn't necessary for sync —
-  // we need an actual CryptoKey. We accept a UX trade-off here: prompt for
-  // password on each push/pull. This keeps the key out of any persistent state.
-  const meta = await getMeta();
-  if (!meta) throw new Error("No vault on this device");
-  const password = window.prompt(
-    "Confirm master password to encrypt for sync:",
-  );
-  if (!password) throw new Error("Cancelled");
-  const key = await deriveVaultKey(password, meta.kdf, "vault");
-  // Verify the password is correct by attempting a tiny encrypt round-trip
-  // against the stored key check.
-  const ok = await verify(key, meta.keyCheck);
-  if (!ok) throw new Error("Wrong password");
-  return key;
-}
-
+// Used by encrypted-file import only — that flow may use a different password
+// than the current vault, so we still need to prompt and verify it.
 async function verify(key: CryptoKey, blob: { iv: string; ciphertext: string }) {
   try {
     const iv = Uint8Array.from(atob(blob.iv), (c) => c.charCodeAt(0));

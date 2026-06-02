@@ -32,7 +32,7 @@ import {
   unlockWithBiometric as unlockBindingRaw,
   type BiometricBinding,
 } from "./biometric";
-import { pushLocalVault } from "./sync";
+import { pullRemoteVault, pushLocalVault } from "./sync";
 import { isAppwriteConfigured } from "./appwrite";
 
 type VaultState =
@@ -71,6 +71,10 @@ type VaultCtx = {
   }) => Promise<EntryRecord>;
   /** Delete an entry by id (triggers auto-sync). */
   deleteEntry: (id: string) => Promise<void>;
+  /** Push local vault to cloud using the in-memory key. */
+  pushNow: () => Promise<void>;
+  /** Pull cloud vault using the in-memory key. Returns true if applied. */
+  pullNow: () => Promise<boolean>;
   /** Decrypt and return the secret for one entry. */
   decryptEntry: (entry: EntryRecord) => Promise<EntrySecret>;
   /** Decrypt all entries (for export). */
@@ -374,6 +378,26 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [scheduleSync],
   );
 
+  // Push/pull use the in-memory vault key directly. The user is already
+  // unlocked (by password or biometric), so we don't need another prompt.
+  const pushNow = useCallback<VaultCtx["pushNow"]>(async () => {
+    if (!keyRef.current) throw new Error("Vault is locked");
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+      dirtyRef.current = 0;
+    }
+    const updated = await pushLocalVault(keyRef.current);
+    metaRef.current = updated;
+  }, []);
+
+  const pullNow = useCallback<VaultCtx["pullNow"]>(async () => {
+    if (!keyRef.current) throw new Error("Vault is locked");
+    const res = await pullRemoteVault(keyRef.current);
+    if (res.applied) metaRef.current = res.meta;
+    return res.applied;
+  }, []);
+
   const decryptEntry = useCallback<VaultCtx["decryptEntry"]>(async (entry) => {
     if (!keyRef.current) throw new Error("Vault is locked");
     return decryptJSON<EntrySecret>(keyRef.current, entry.payload);
@@ -401,6 +425,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       resetLocalVault,
       saveEntry,
       deleteEntry,
+      pushNow,
+      pullNow,
       decryptEntry,
       decryptAll,
     }),
@@ -416,6 +442,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       resetLocalVault,
       saveEntry,
       deleteEntry,
+      pushNow,
+      pullNow,
       decryptEntry,
       decryptAll,
     ],

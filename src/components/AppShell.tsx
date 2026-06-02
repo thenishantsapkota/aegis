@@ -1,13 +1,144 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, Plus, Settings as SettingsIcon } from "lucide-react";
+import { Home, Plus, Settings as SettingsIcon, RefreshCcw } from "lucide-react";
 import { cn } from "~/lib/cn";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-export function AppShell({ children }: { children: ReactNode }) {
+const PULL_THRESHOLD = 70; // px past which release triggers refresh
+const PULL_MAX = 110; // visual ceiling so the rubber-band doesn't run away
+
+export function AppShell({
+  children,
+  onRefresh,
+}: {
+  children: ReactNode;
+  /** When provided, the scroll container shows a pull-to-refresh affordance. */
+  onRefresh?: () => Promise<void>;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const startYRef = useRef<number | null>(null);
+  const [pull, setPull] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (!onRefresh) return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (refreshing) return;
+      if (el.scrollTop > 0) return;
+      startYRef.current = e.touches[0].clientY;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (startYRef.current === null || refreshing) return;
+      const dy = e.touches[0].clientY - startYRef.current;
+      if (dy <= 0) {
+        // scrolling up — give control back to the browser
+        setPull(0);
+        return;
+      }
+      // Apply diminishing-returns curve so the indicator never feels rigid.
+      const damped = Math.min(PULL_MAX, dy * 0.55);
+      setPull(damped);
+      // Prevent native overscroll / iOS pull-to-reload while we're pulling.
+      if (e.cancelable) e.preventDefault();
+    };
+    const onTouchEnd = async () => {
+      const dy = pullRef.current;
+      startYRef.current = null;
+      if (dy >= PULL_THRESHOLD && !refreshing) {
+        setRefreshing(true);
+        setPull(PULL_THRESHOLD);
+        try {
+          await onRefresh();
+        } catch {
+          /* swallow — surfaced elsewhere */
+        } finally {
+          setRefreshing(false);
+          setPull(0);
+        }
+      } else {
+        setPull(0);
+      }
+    };
+
+    // touchmove must be non-passive so we can preventDefault when pulling
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [onRefresh, refreshing]);
+
+  // Keep a ref mirror so the touchend handler reads the latest value without
+  // having to re-bind every render.
+  const pullRef = useRef(0);
+  pullRef.current = pull;
+
+  const progress = Math.min(1, pull / PULL_THRESHOLD);
+  const showIndicator = pull > 0 || refreshing;
+
   return (
     <div className="flex flex-col h-safe-screen">
-      <div className="flex-1 overflow-y-auto pb-32 pt-safe pl-safe pr-safe">
-        <div className="mx-auto w-full max-w-2xl px-4">{children}</div>
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto pb-32 pt-safe pl-safe pr-safe relative"
+        style={{ overscrollBehaviorY: onRefresh ? "contain" : undefined }}
+      >
+        {onRefresh && (
+          <div
+            className="pointer-events-none absolute left-0 right-0 flex justify-center"
+            style={{
+              top: 0,
+              transform: `translateY(${Math.max(0, pull - 28)}px)`,
+              opacity: showIndicator ? 1 : 0,
+              transition: refreshing
+                ? "opacity 150ms ease"
+                : startYRef.current === null
+                  ? "transform 200ms ease, opacity 200ms ease"
+                  : "opacity 120ms ease",
+            }}
+          >
+            <span
+              className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg-elev border border-border text-muted"
+              style={{
+                boxShadow: "0 8px 24px -8px rgb(0 0 0 / 0.5)",
+              }}
+            >
+              <RefreshCcw
+                size={16}
+                className={refreshing ? "animate-spin" : ""}
+                style={{
+                  transform: refreshing
+                    ? undefined
+                    : `rotate(${progress * 360}deg)`,
+                  transition: "transform 80ms linear",
+                }}
+              />
+            </span>
+          </div>
+        )}
+        <div
+          className="mx-auto w-full max-w-2xl px-4"
+          style={
+            onRefresh
+              ? {
+                  transform: `translateY(${pull}px)`,
+                  transition:
+                    startYRef.current === null && !refreshing
+                      ? "transform 200ms ease"
+                      : undefined,
+                }
+              : undefined
+          }
+        >
+          {children}
+        </div>
       </div>
       <BottomNav />
     </div>

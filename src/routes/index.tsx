@@ -1,15 +1,16 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useVault } from "~/lib/vault-context";
 import { AppShell } from "~/components/AppShell";
 import { VaultView } from "~/components/VaultView";
+import { isAppwriteConfigured } from "~/lib/appwrite";
 
 export const Route = createFileRoute("/")({
   component: HomeRoute,
 });
 
 function HomeRoute() {
-  const { state } = useVault();
+  const { state, pullNow, pushNow } = useVault();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -20,6 +21,20 @@ function HomeRoute() {
     }
   }, [state.status, navigate]);
 
+  const onRefresh = useCallback(async () => {
+    if (!isAppwriteConfigured()) return;
+    try {
+      await pullNow();
+    } catch (e) {
+      console.warn("[swipe-sync] pull failed:", e);
+    }
+    try {
+      await pushNow();
+    } catch (e) {
+      console.warn("[swipe-sync] push failed:", e);
+    }
+  }, [pullNow, pushNow]);
+
   if (state.status !== "unlocked") {
     return (
       <div className="h-safe-screen flex items-center justify-center text-muted">
@@ -29,7 +44,7 @@ function HomeRoute() {
   }
 
   return (
-    <AppShell>
+    <AppShell onRefresh={onRefresh}>
       <VaultView />
     </AppShell>
   );

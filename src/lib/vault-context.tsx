@@ -32,7 +32,7 @@ import {
   unlockWithBiometric as unlockBindingRaw,
   type BiometricBinding,
 } from "./biometric";
-import { pullRemoteVault, pushLocalVault } from "./sync";
+import { cloudSignUpFresh, pullRemoteVault, pushLocalVault } from "./sync";
 import { isAppwriteConfigured } from "./appwrite";
 
 type VaultState =
@@ -45,6 +45,8 @@ type VaultCtx = {
   state: VaultState;
   /** Create a brand-new vault on this device. */
   initialize: (password: string, email?: string | null) => Promise<void>;
+  /** Create a brand-new cloud account + local vault in one shot, then unlock. */
+  signUpCloud: (password: string, email: string) => Promise<void>;
   /** Unlock with master password. Returns false if password is wrong. */
   unlock: (password: string) => Promise<boolean>;
   /** Unlock via biometric (Face ID / Touch ID / Windows Hello / Android fingerprint). */
@@ -250,6 +252,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [startUnlockWindow],
   );
 
+  const signUpCloud = useCallback(
+    async (password: string, email: string) => {
+      const { meta, vaultKey } = await cloudSignUpFresh(password, email);
+      metaRef.current = meta;
+      keyRef.current = vaultKey;
+      startUnlockWindow();
+      setState(unlockedState(meta));
+    },
+    [startUnlockWindow],
+  );
+
   const unlock = useCallback(
     async (password: string) => {
       const meta = await getMeta();
@@ -428,6 +441,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     () => ({
       state,
       initialize,
+      signUpCloud,
       unlock,
       unlockWithBiometric,
       enableBiometric,
@@ -445,6 +459,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [
       state,
       initialize,
+      signUpCloud,
       unlock,
       unlockWithBiometric,
       enableBiometric,

@@ -13,6 +13,7 @@ import {
   deriveVaultKey,
   encryptJSON,
   makeKeyCheck,
+  newKdfParams,
   verifyKeyCheck,
   type EncryptedBlob,
   type KdfParams,
@@ -100,6 +101,49 @@ export async function cloudSignUp(
 
   // Auto-push the initial vault so this account isn't empty in the cloud.
   return await pushLocalVault(vaultKey);
+}
+
+// Create a brand-new cloud account AND a fresh local vault in one shot, for
+// users who land on /setup and want cloud sync from day one — no separate
+// "make local vault first, then link" dance. The empty vault is pushed up
+// immediately so future devices can /restore.
+export async function cloudSignUpFresh(
+  masterPassword: string,
+  email: string,
+): Promise<{ meta: VaultMeta; vaultKey: CryptoKey }> {
+  const authPassword = await deriveAuthPassword(masterPassword, email);
+  const { account } = appwrite();
+  try {
+    await account.create(ID.unique(), email, authPassword);
+  } catch (e) {
+    throw normalizeError(e, "Sign-up failed");
+  }
+  try {
+    await safeCreateSession(email, authPassword);
+  } catch (e) {
+    throw normalizeError(e, "Sign-in after sign-up failed");
+  }
+  const user = await account.get();
+
+  const kdf = newKdfParams();
+  const vaultKey = await deriveVaultKey(masterPassword, kdf, VAULT_CONTEXT);
+  const keyCheck = await makeKeyCheck(vaultKey);
+  const initialMeta: VaultMeta = {
+    id: "vault",
+    email,
+    kdf,
+    keyCheck,
+    createdAt: Date.now(),
+    remoteVersion: null,
+    lastSyncedAt: null,
+    sessionToken: "appwrite",
+    userId: user.$id,
+    biometric: null,
+  };
+  await db().meta.put(initialMeta);
+
+  const pushed = await pushLocalVault(vaultKey);
+  return { meta: pushed, vaultKey };
 }
 
 // Sign in on a device that already has a local vault. If the cloud has data,

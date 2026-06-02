@@ -1,22 +1,23 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
-  ShieldCheck,
-  KeyRound,
   AlertTriangle,
+  ArrowLeft,
   Cloud,
-  CloudDownload,
+  KeyRound,
 } from "lucide-react";
 import { useVault } from "~/lib/vault-context";
 import { isAppwriteConfigured } from "~/lib/appwrite";
 
-export const Route = createFileRoute("/setup")({
-  component: SetupRoute,
+// Create a cloud account directly on first-time use. No local-vault-first dance.
+export const Route = createFileRoute("/signup")({
+  component: SignUpRoute,
 });
 
-function SetupRoute() {
-  const { state, initialize } = useVault();
+function SignUpRoute() {
+  const { state, signUpCloud } = useVault();
   const navigate = useNavigate();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,7 +31,6 @@ function SetupRoute() {
     );
   }
   if (state.status !== "uninitialized") {
-    // Already have a vault — bounce.
     navigate({ to: "/" });
     return null;
   }
@@ -38,6 +38,12 @@ function SetupRoute() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!isAppwriteConfigured()) {
+      setError(
+        "Cloud sync isn't configured. Set Appwrite env vars (see .env.example).",
+      );
+      return;
+    }
     if (password.length < 8) {
       setError("Use at least 8 characters.");
       return;
@@ -48,10 +54,12 @@ function SetupRoute() {
     }
     setBusy(true);
     try {
-      await initialize(password);
+      await signUpCloud(password, email.trim());
       navigate({ to: "/" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create vault");
+      setError(
+        err instanceof Error ? err.message : "Failed to create cloud account",
+      );
     } finally {
       setBusy(false);
     }
@@ -62,27 +70,46 @@ function SetupRoute() {
       <div className="w-full max-w-md card p-6 animate-fade-in">
         <div className="flex items-center gap-3 mb-5">
           <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-accent/15 text-accent">
-            <ShieldCheck size={22} />
+            <Cloud size={22} />
           </span>
-          <div>
-            <h1 className="text-xl font-semibold">Create your vault</h1>
+          <div className="flex-1">
+            <h1 className="text-xl font-semibold">Create cloud account</h1>
             <p className="text-sm text-muted">
-              Codes are encrypted on this device.
+              Sync across devices from day one.
             </p>
           </div>
+          <Link
+            to="/setup"
+            className="w-9 h-9 rounded-xl bg-bg-elev border border-border flex items-center justify-center"
+            aria-label="Back"
+          >
+            <ArrowLeft size={16} />
+          </Link>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4">
+          <div>
+            <label className="label">Email</label>
+            <input
+              type="email"
+              className="input"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              autoFocus
+              required
+            />
+          </div>
           <div>
             <label className="label">Master password</label>
             <input
               type="password"
               autoComplete="new-password"
-              autoFocus
               className="input"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 8 characters"
+              required
             />
           </div>
           <div>
@@ -94,6 +121,7 @@ function SetupRoute() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               placeholder="Repeat your password"
+              required
             />
           </div>
 
@@ -107,51 +135,15 @@ function SetupRoute() {
           <div className="rounded-xl bg-warn/10 border border-warn/30 p-3 text-xs text-warn flex gap-2">
             <KeyRound size={16} className="mt-0.5 shrink-0" />
             <span>
-              If you forget this password, your codes cannot be recovered. We
-              never see it. Save it in a password manager.
+              Your master password encrypts the vault end-to-end. We never see
+              it — if you forget it, your codes can't be recovered.
             </span>
           </div>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="btn-primary w-full"
-          >
-            {busy ? "Creating vault…" : "Create vault"}
+          <button type="submit" disabled={busy} className="btn-primary w-full">
+            {busy ? "Creating account…" : "Create account"}
           </button>
         </form>
-
-        {isAppwriteConfigured() && (
-          <>
-            <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-[0.08em] text-muted">
-              <div className="flex-1 h-px bg-white/[0.08]" />
-              or
-              <div className="flex-1 h-px bg-white/[0.08]" />
-            </div>
-            <div className="space-y-2">
-              <Link
-                to="/signup"
-                className="btn-ghost w-full"
-                aria-label="Create cloud account"
-              >
-                <Cloud size={18} />
-                Create cloud account
-              </Link>
-              <Link
-                to="/restore"
-                className="btn-ghost w-full"
-                aria-label="Sign in to existing account"
-              >
-                <CloudDownload size={18} />
-                Sign in to existing account
-              </Link>
-            </div>
-            <p className="text-xs text-muted text-center mt-3">
-              Cloud account = sync across devices. Sign in to pull codes from
-              another device.
-            </p>
-          </>
-        )}
       </div>
     </div>
   );

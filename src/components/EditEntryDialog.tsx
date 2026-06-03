@@ -85,15 +85,17 @@ export function EditEntryDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in"
+      className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in"
       onClick={onClose}
     >
       <div
-        className="card-strong w-full max-w-md p-5 rounded-t-2.5xl sm:rounded-2.5xl animate-scale-in"
+        className="card-strong w-full max-w-md rounded-t-2.5xl sm:rounded-2.5xl animate-scale-in flex flex-col"
         onClick={(e) => e.stopPropagation()}
-        style={{ paddingBottom: "max(1.25rem, var(--safe-bottom))" }}
+        style={{
+          maxHeight: "calc(100dvh - env(safe-area-inset-top, 0px) - 1rem)",
+        }}
       >
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
           <h2 className="text-lg font-semibold">Edit entry</h2>
           <button
             onClick={onClose}
@@ -104,7 +106,10 @@ export function EditEntryDialog({
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div
+          className="space-y-4 overflow-y-auto overscroll-contain px-5 pb-5"
+          style={{ paddingBottom: "max(1.25rem, var(--safe-bottom))" }}
+        >
           <div>
             <label className="label">Issuer</label>
             <input

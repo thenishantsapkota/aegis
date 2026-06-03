@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Copy, Check, MoreHorizontal } from "lucide-react";
 import type { EntryRecord, EntrySecret } from "~/lib/db";
 import { generateCode, totpRemainingSeconds } from "~/lib/totp";
@@ -10,7 +10,27 @@ type Props = {
   onEdit?: (e: EntryRecord) => void;
 };
 
-export function CodeCard({ entry, onEdit }: Props) {
+// One shared timer drives every card on screen — avoids N setIntervals per
+// vault and keeps the per-second work O(subscribers) instead of O(intervals).
+const subscribers = new Set<() => void>();
+let tickerId: ReturnType<typeof setInterval> | null = null;
+function subscribe(fn: () => void) {
+  subscribers.add(fn);
+  if (tickerId === null) {
+    tickerId = setInterval(() => {
+      subscribers.forEach((cb) => cb());
+    }, 1000);
+  }
+  return () => {
+    subscribers.delete(fn);
+    if (subscribers.size === 0 && tickerId !== null) {
+      clearInterval(tickerId);
+      tickerId = null;
+    }
+  };
+}
+
+function CodeCardBase({ entry, onEdit }: Props) {
   const { decryptEntry } = useVault();
   const [secret, setSecret] = useState<EntrySecret | null>(null);
   const [code, setCode] = useState<string>("••• •••");
@@ -43,8 +63,7 @@ export function CodeCard({ entry, onEdit }: Props) {
       setRemaining(totpRemainingSeconds(secret.period));
     };
     tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
+    return subscribe(tick);
   }, [secret]);
 
   const ringProps = useMemo(() => {
@@ -82,7 +101,7 @@ export function CodeCard({ entry, onEdit }: Props) {
     "?";
 
   return (
-    <div className="card p-3 sm:p-4 flex items-center gap-3 sm:gap-4 transition-all duration-200 active:scale-[0.995] hover:[border-color:rgb(255_255_255/0.14)]">
+    <div className="card p-3 sm:p-4 flex items-center gap-3 sm:gap-4 transition-colors duration-200 hover:[border-color:rgb(255_255_255/0.14)]">
       <div className="code-avatar">
         <span className="drop-shadow-sm">{initial}</span>
       </div>
@@ -116,18 +135,6 @@ export function CodeCard({ entry, onEdit }: Props) {
             viewBox="0 0 40 40"
             className="shrink-0 sm:w-10 sm:h-10"
           >
-            <defs>
-              <linearGradient
-                id={`ring-${entry.id}`}
-                x1="0%"
-                y1="0%"
-                x2="100%"
-                y2="100%"
-              >
-                <stop offset="0%" stopColor="rgb(124 134 255)" />
-                <stop offset="100%" stopColor="rgb(56 189 248)" />
-              </linearGradient>
-            </defs>
             <circle
               cx="20"
               cy="20"
@@ -142,9 +149,7 @@ export function CodeCard({ entry, onEdit }: Props) {
               r={ringProps.radius}
               fill="none"
               stroke={
-                ringProps.lowTime
-                  ? "rgb(248 113 113)"
-                  : `url(#ring-${entry.id})`
+                ringProps.lowTime ? "rgb(248 113 113)" : "rgb(124 134 255)"
               }
               strokeWidth="3"
               strokeLinecap="round"
@@ -171,7 +176,7 @@ export function CodeCard({ entry, onEdit }: Props) {
           type="button"
           onClick={copyCode}
           className={cn(
-            "w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center transition-all duration-150",
+            "w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center transition-colors duration-150",
             copied
               ? "bg-success/15 text-success border border-success/30"
               : "bg-white/[0.04] text-muted border border-white/[0.08] hover:bg-white/[0.08] hover:text-white",
@@ -184,7 +189,7 @@ export function CodeCard({ entry, onEdit }: Props) {
           <button
             type="button"
             onClick={() => onEdit(entry)}
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white hover:bg-white/[0.08] transition-all"
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white hover:bg-white/[0.08] transition-colors"
             aria-label="More"
           >
             <MoreHorizontal size={16} />
@@ -194,3 +199,20 @@ export function CodeCard({ entry, onEdit }: Props) {
     </div>
   );
 }
+
+// Skip re-renders when the parent VaultView updates for unrelated reasons.
+// `onEdit` is a stable setState updater from useState, so it's safe to compare
+// by reference; `entry` is a Dexie record — compare the fields that affect the
+// rendered output (everything else is stable per id).
+export const CodeCard = memo(CodeCardBase, (a, b) => {
+  if (a.onEdit !== b.onEdit) return false;
+  const ae = a.entry;
+  const be = b.entry;
+  return (
+    ae.id === be.id &&
+    ae.issuer === be.issuer &&
+    ae.account === be.account &&
+    ae.updatedAt === be.updatedAt &&
+    ae.folderId === be.folderId
+  );
+});

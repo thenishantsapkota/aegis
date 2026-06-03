@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
@@ -15,17 +18,130 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Aegis" />
-    <link rel="apple-touch-icon" href="/favicon.svg" />
-
     <meta name="msapplication-TileColor" content="#0b0f17" />
-    <title>Aegis — 2FA Codes</title>
+
+    <!-- Primary SEO -->
+    <title>Aegis — Open-Source 2FA Authenticator with Encrypted Cloud Sync</title>
     <meta
       name="description"
-      content="Aegis: offline-first 2FA authenticator. Codes you carry."
+      content="Aegis is a free, open-source 2FA authenticator app. End-to-end encrypted vault, offline-first TOTP/HOTP codes, biometric unlock, folder organization, and zero-knowledge cloud sync across devices. No tracking. No ads."
     />
+    <meta
+      name="keywords"
+      content="2FA authenticator, two-factor authentication, TOTP, HOTP, authenticator app, open source authenticator, encrypted authenticator, end-to-end encrypted 2FA, free authenticator, web authenticator, PWA authenticator, Google Authenticator alternative, Authy alternative, password vault, security"
+    />
+    <meta name="author" content="Aegis" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="googlebot" content="index, follow" />
+    <link rel="canonical" href="https://aegis-auth.vercel.app/" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Aegis" />
+    <meta property="og:url" content="https://aegis-auth.vercel.app/" />
+    <meta
+      property="og:title"
+      content="Aegis — Open-Source 2FA Authenticator with Encrypted Cloud Sync"
+    />
+    <meta
+      property="og:description"
+      content="Free, open-source 2FA authenticator. End-to-end encrypted vault, offline-first TOTP codes, biometric unlock, and zero-knowledge cloud sync. Codes you carry."
+    />
+    <meta property="og:image" content="https://aegis-auth.vercel.app/favicon.svg" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="Aegis — Open-Source 2FA Authenticator"
+    />
+    <meta
+      name="twitter:description"
+      content="Free, open-source 2FA authenticator. End-to-end encrypted vault, offline-first TOTP codes, biometric unlock, zero-knowledge sync."
+    />
+    <meta name="twitter:image" content="https://aegis-auth.vercel.app/favicon.svg" />
+
+    <!-- Preconnect to speed up Appwrite endpoint TLS for first sync -->
+    <link rel="dns-prefetch" href="//cloud.appwrite.io" />
+
+    <!-- Structured data for rich results -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Aegis",
+        "alternateName": "Aegis Authenticator",
+        "url": "https://aegis-auth.vercel.app/",
+        "description": "Aegis is a free, open-source, end-to-end encrypted 2FA authenticator. Offline-first TOTP/HOTP codes with biometric unlock, folder organization, and zero-knowledge encrypted cloud sync.",
+        "applicationCategory": "SecurityApplication",
+        "operatingSystem": "Web, iOS, Android, Windows, macOS, Linux",
+        "browserRequirements": "Requires a modern browser with Web Crypto API and IndexedDB.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "End-to-end encrypted vault",
+          "Offline-first TOTP and HOTP code generation",
+          "Biometric unlock (Face ID, Touch ID, Windows Hello, Android fingerprint)",
+          "Zero-knowledge encrypted cloud sync",
+          "Folder organization",
+          "QR code scanner with Google Authenticator migration import",
+          "Encrypted backup export and restore",
+          "Progressive Web App — installable on any device"
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is Aegis really end-to-end encrypted?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Your vault key is derived from your master password locally and never leaves your device. The cloud only ever sees encrypted blobs."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Aegis work offline?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Codes are generated entirely on-device and your vault is stored locally in IndexedDB. Cloud sync is optional."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I import from Google Authenticator?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Aegis scans Google Authenticator export QR codes and imports all of your accounts in one step."
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Pre-paint hint for SEO crawlers and users on slow connections -->
+      <noscript>
+        <div style="padding: 2rem; max-width: 640px; margin: 0 auto; color: #f4f6ff; font-family: system-ui, sans-serif;">
+          <h1>Aegis — Open-Source 2FA Authenticator</h1>
+          <p>
+            Aegis is a free, open-source two-factor authentication app with
+            end-to-end encrypted cloud sync. Codes are generated on your
+            device and your vault never leaves it unencrypted.
+          </p>
+          <p>JavaScript is required to use the authenticator.</p>
+        </div>
+      </noscript>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

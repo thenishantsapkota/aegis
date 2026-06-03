@@ -50,82 +50,92 @@ export function FolderManagerDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="card w-full max-w-md p-5 rounded-t-2xl sm:rounded-2xl animate-fade-in"
+        className="card w-full max-w-md rounded-t-2xl sm:rounded-2xl animate-fade-in flex flex-col"
         onClick={(e) => e.stopPropagation()}
-        style={{ paddingBottom: "max(1.25rem, var(--safe-bottom))" }}
+        style={{
+          maxHeight: "calc(100dvh - env(safe-area-inset-top, 0px) - 1rem)",
+        }}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
           <h2 className="text-lg font-semibold">Folders</h2>
           <button
             onClick={onClose}
             className="w-9 h-9 rounded-xl bg-bg-elev border border-border flex items-center justify-center"
+            aria-label="Close"
           >
             <X size={16} />
           </button>
         </div>
 
-        <form onSubmit={addFolder} className="space-y-3 mb-5">
-          <div>
-            <label className="label">New folder name</label>
-            <input
-              type="text"
-              className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Work, Personal, Finance…"
-            />
-          </div>
-          <div>
-            <label className="label">Color</label>
-            <div className="flex flex-wrap gap-2">
-              {FOLDER_COLORS.map((c) => (
-                <button
-                  type="button"
-                  key={c}
-                  onClick={() => setColor(c)}
-                  className="w-7 h-7 rounded-full border-2 transition"
-                  style={{
-                    background: c,
-                    borderColor: color === c ? "white" : "transparent",
-                  }}
-                  aria-label={`Color ${c}`}
-                />
-              ))}
+        <div
+          className="overflow-y-auto overscroll-contain px-5 pb-5"
+          style={{ paddingBottom: "max(1.25rem, var(--safe-bottom))" }}
+        >
+          <form onSubmit={addFolder} className="space-y-3 mb-5">
+            <div>
+              <label className="label">New folder name</label>
+              <input
+                type="text"
+                className="input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Work, Personal, Finance…"
+              />
             </div>
-          </div>
-          <button type="submit" className="btn-primary w-full">
-            Add folder
-          </button>
-        </form>
-
-        <div className="space-y-2 max-h-64 overflow-y-auto">
-          {folders.length === 0 ? (
-            <p className="text-muted text-sm text-center py-4">No folders yet.</p>
-          ) : (
-            folders.map((f) => (
-              <div
-                key={f.id}
-                className="flex items-center gap-3 p-3 rounded-xl bg-bg-elev border border-border"
-              >
-                <span
-                  className="w-3 h-3 rounded-full shrink-0"
-                  style={{ background: f.color }}
-                />
-                <span className="flex-1 truncate">{f.name}</span>
-                <button
-                  onClick={() => removeFolder(f.id)}
-                  className="w-9 h-9 rounded-xl text-danger hover:bg-danger/10 flex items-center justify-center"
-                  aria-label={`Delete ${f.name}`}
-                >
-                  <Trash2 size={16} />
-                </button>
+            <div>
+              <label className="label">Color</label>
+              <div className="flex flex-wrap gap-2">
+                {FOLDER_COLORS.map((c) => (
+                  <button
+                    type="button"
+                    key={c}
+                    onClick={() => setColor(c)}
+                    className="w-7 h-7 rounded-full border-2 transition"
+                    style={{
+                      background: c,
+                      borderColor: color === c ? "white" : "transparent",
+                    }}
+                    aria-label={`Color ${c}`}
+                  />
+                ))}
               </div>
-            ))
-          )}
+            </div>
+            <button type="submit" className="btn-primary w-full">
+              Add folder
+            </button>
+          </form>
+
+          <div className="space-y-2">
+            {folders.length === 0 ? (
+              <p className="text-muted text-sm text-center py-4">
+                No folders yet.
+              </p>
+            ) : (
+              folders.map((f) => (
+                <div
+                  key={f.id}
+                  className="flex items-center gap-3 p-3 rounded-xl bg-bg-elev border border-border"
+                >
+                  <span
+                    className="w-3 h-3 rounded-full shrink-0"
+                    style={{ background: f.color }}
+                  />
+                  <span className="flex-1 truncate">{f.name}</span>
+                  <button
+                    onClick={() => removeFolder(f.id)}
+                    className="w-9 h-9 rounded-xl text-danger hover:bg-danger/10 flex items-center justify-center"
+                    aria-label={`Delete ${f.name}`}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>

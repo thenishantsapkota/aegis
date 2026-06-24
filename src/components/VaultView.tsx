@@ -49,6 +49,14 @@ export function VaultView() {
   const unfiledCount = entries.filter((e) => !e.folderId).length;
   const hasFolders = folders.length > 0;
 
+  const folderById = useMemo(
+    () => new Map(folders.map((f) => [f.id, f])),
+    [folders],
+  );
+  // Folder labels only add information in the mixed "All" view — within a
+  // single folder every card shares it, and unfiled cards have none.
+  const showFolderLabels = activeFolder === ALL_FOLDERS;
+
   return (
     <div className="pt-6 animate-fade-in">
       <header className="flex items-end justify-between mb-6">
@@ -130,9 +138,21 @@ export function VaultView() {
             search={search.trim() !== ""}
           />
         ) : (
-          filtered.map((e) => (
-            <CodeCard key={e.id} entry={e} onEdit={setEditing} />
-          ))
+          filtered.map((e) => {
+            const folder =
+              showFolderLabels && e.folderId
+                ? folderById.get(e.folderId)
+                : undefined;
+            return (
+              <CodeCard
+                key={e.id}
+                entry={e}
+                onEdit={setEditing}
+                folderName={folder?.name}
+                folderColor={folder?.color}
+              />
+            );
+          })
         )}
       </div>
 

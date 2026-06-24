@@ -8,6 +8,8 @@ import { cn } from "~/lib/cn";
 type Props = {
   entry: EntryRecord;
   onEdit?: (e: EntryRecord) => void;
+  folderName?: string;
+  folderColor?: string;
 };
 
 // One shared timer drives every card on screen — avoids N setIntervals per
@@ -30,7 +32,7 @@ function subscribe(fn: () => void) {
   };
 }
 
-function CodeCardBase({ entry, onEdit }: Props) {
+function CodeCardBase({ entry, onEdit, folderName, folderColor }: Props) {
   const { decryptEntry } = useVault();
   const [secret, setSecret] = useState<EntrySecret | null>(null);
   const [code, setCode] = useState<string>("••• •••");
@@ -112,8 +114,21 @@ function CodeCardBase({ entry, onEdit }: Props) {
         className="flex-1 min-w-0 text-left group"
         aria-label={`Copy code for ${entry.issuer || entry.account}`}
       >
-        <div className="text-[11px] text-muted truncate font-semibold uppercase tracking-[0.08em]">
-          {entry.issuer || "—"}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[11px] text-muted truncate font-semibold uppercase tracking-[0.08em]">
+            {entry.issuer || "—"}
+          </span>
+          {folderName && (
+            <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-white/[0.06] border border-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-muted normal-case tracking-normal">
+              {folderColor && (
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ background: folderColor }}
+                />
+              )}
+              <span className="truncate max-w-[7rem]">{folderName}</span>
+            </span>
+          )}
         </div>
         <div className="font-mono text-2xl sm:text-[28px] leading-tight font-semibold tracking-[0.04em] tabular-nums mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis group-active:text-gradient transition">
           {error ? (
@@ -206,6 +221,8 @@ function CodeCardBase({ entry, onEdit }: Props) {
 // rendered output (everything else is stable per id).
 export const CodeCard = memo(CodeCardBase, (a, b) => {
   if (a.onEdit !== b.onEdit) return false;
+  if (a.folderName !== b.folderName || a.folderColor !== b.folderColor)
+    return false;
   const ae = a.entry;
   const be = b.entry;
   return (

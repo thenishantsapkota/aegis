@@ -8,7 +8,7 @@
 // We also support an UNENCRYPTED form (otpauth:// list) for migration to other apps.
 
 import type { EncryptedBlob, KdfParams } from "./crypto";
-import type { EntryRecord, EntrySecret, Folder } from "./db";
+import type { EntryRecord, EntrySecret, Folder, TeamKeyCacheEntry } from "./db";
 import type { Identity } from "./team-crypto";
 
 export const EXPORT_VERSION = 1;
@@ -24,6 +24,9 @@ export type EncryptedExport = {
   // Synced so every device with this account uses the SAME keypair — otherwise
   // team key grants wrapped to one device can't be unwrapped on another.
   identity?: Identity | null;
+  // Team keys this account holds, encrypted under the vault key. Lets every
+  // device on the account decrypt team codes without RSA-identity convergence.
+  teamKeyCache?: TeamKeyCacheEntry[];
   folders: Folder[];
   entries: Array<Omit<EntryRecord, "createdAt" | "updatedAt"> & {
     createdAt: number;

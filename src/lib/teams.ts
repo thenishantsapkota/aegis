@@ -415,6 +415,7 @@ export async function syncMyTeams(): Promise<TeamRecord[]> {
       await db().teams.delete(t.id);
       await db().teamEntries.where("teamId").equals(t.id).delete();
       await db().teamFolders.where("teamId").equals(t.id).delete();
+      await db().teamKeyCache.delete(t.id);
     }
   }
   return out;
@@ -640,6 +641,7 @@ export async function leaveTeam(team: TeamRecord): Promise<void> {
   await db().teams.delete(team.id);
   await db().teamEntries.where("teamId").equals(team.id).delete();
   await db().teamFolders.where("teamId").equals(team.id).delete();
+  await db().teamKeyCache.delete(team.id);
 }
 
 export async function updateMemberRole(

@@ -302,18 +302,59 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // Unwrap every locally-known team key into memory using our private key.
-  const hydrateTeams = useCallback(async () => {
+  // Persist a team key for this account, encrypted under the vault key, so our
+  // OTHER devices pick it up via the personal vault sync.
+  const cacheTeamKey = useCallback(
+    async (teamId: string, key: CryptoKey) => {
+      const vaultKey = keyRef.current;
+      if (!vaultKey) return;
+      try {
+        const raw = await exportRawVaultKey(key);
+        const wrapped = await encryptJSON(vaultKey, Array.from(raw));
+        await db().teamKeyCache.put({ teamId, wrapped });
+      } catch (e) {
+        console.warn("[teams] caching team key failed:", e);
+      }
+    },
+    [],
+  );
+
+  // Load every team key we can into memory. Preferred source is the vault-key
+  // cache (works on any device of this account); falls back to unwrapping the
+  // RSA grant with our identity, then caches that so our other devices get it.
+  // Returns how many keys were newly seeded into the cache from an RSA grant —
+  // the caller should push if >0 so the cache reaches the account's devices.
+  const hydrateTeams = useCallback(async (): Promise<number> => {
+    const vaultKey = keyRef.current;
     const pk = privateKeyRef.current;
-    if (!pk) return;
     const teams = await db().teams.toArray();
+    const cache = await db().teamKeyCache.toArray();
+    const cacheById = new Map(cache.map((c) => [c.teamId, c]));
     const map = new Map<string, CryptoKey>();
+    let seeded = 0;
     for (const t of teams) {
-      const k = await unwrapTeamKeyFor(t, pk);
-      if (k) map.set(t.id, k);
+      let key: CryptoKey | null = null;
+      const cached = cacheById.get(t.id);
+      if (cached && vaultKey) {
+        try {
+          const arr = await decryptJSON<number[]>(vaultKey, cached.wrapped);
+          key = await importRawVaultKey(new Uint8Array(arr));
+        } catch (e) {
+          console.warn("[teams] cache unwrap failed:", e);
+        }
+      }
+      if (!key && pk) {
+        key = await unwrapTeamKeyFor(t, pk);
+        if (key) {
+          await cacheTeamKey(t.id, key); // seed the cache for other devices
+          seeded++;
+        }
+      }
+      if (key) map.set(t.id, key);
     }
     teamKeysRef.current = map;
-  }, []);
+    return seeded;
+  }, [cacheTeamKey]);
 
   // Best-effort "get up to date with the cloud" pass: pull the personal vault,
   // publish our public key, sync the team list, unwrap team keys, and pull each
@@ -372,7 +413,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
       try {
         await syncMyTeams();
-        await hydrateTeams();
+        const seeded = await hydrateTeams();
+        // If we just derived team keys from RSA grants, push so the vault-key
+        // cache reaches the account's other devices.
+        if (seeded > 0 && vk) {
+          try {
+            const pushed = await pushLocalVault(vk);
+            metaRef.current = pushed;
+          } catch (e) {
+            console.warn("[teams] propagating team key cache failed:", e);
+          }
+        }
         const teams = await db().teams.toArray();
         for (const t of teams) {
           const key = teamKeysRef.current.get(t.id);
@@ -663,9 +714,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const setTeamKey = useCallback<VaultCtx["setTeamKey"]>((teamId, key) => {
-    teamKeysRef.current.set(teamId, key);
-  }, []);
+  const setTeamKey = useCallback<VaultCtx["setTeamKey"]>(
+    (teamId, key) => {
+      teamKeysRef.current.set(teamId, key);
+      // Cache it and push so this account's other devices get the key too.
+      void (async () => {
+        await cacheTeamKey(teamId, key);
+        await backgroundPush();
+      })();
+    },
+    [cacheTeamKey, backgroundPush],
+  );
 
   const hasTeamAccess = useCallback<VaultCtx["hasTeamAccess"]>(
     (teamId) => teamKeysRef.current.has(teamId),

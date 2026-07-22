@@ -53,6 +53,16 @@ export type TeamFolder = {
   createdAt: number;
 };
 
+// A team key cached for THIS user, encrypted under the vault key. Synced inside
+// the personal vault blob so every device on the account gets the team key
+// without relying on per-device RSA identity convergence. (RSA grants are still
+// how the key first reaches a member; this cache is how it reaches that member's
+// OTHER devices.)
+export type TeamKeyCacheEntry = {
+  teamId: string;
+  wrapped: EncryptedBlob; // raw team-key bytes, encrypted with the vault key
+};
+
 // A shared OTP entry. Identical shape to EntryRecord but the payload is
 // encrypted with the TEAM key rather than the personal vault key.
 export type TeamEntryRecord = {
@@ -108,6 +118,7 @@ export class VaultDB extends Dexie {
   teams!: Table<TeamRecord, string>;
   teamEntries!: Table<TeamEntryRecord, string>;
   teamFolders!: Table<TeamFolder, string>;
+  teamKeyCache!: Table<TeamKeyCacheEntry, string>;
 
   constructor() {
     super("vault-authenticator");
@@ -125,6 +136,10 @@ export class VaultDB extends Dexie {
     this.version(3).stores({
       teamEntries: "id, teamId, folderId, sortOrder",
       teamFolders: "id, teamId, sortOrder",
+    });
+    // v4: per-user team key cache (synced via the personal vault).
+    this.version(4).stores({
+      teamKeyCache: "teamId",
     });
   }
 }

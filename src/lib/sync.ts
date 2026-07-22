@@ -207,14 +207,17 @@ export async function cloudSignInExisting(
 
     await db().transaction(
       "rw",
-      [db().folders, db().entries, db().meta],
+      [db().folders, db().entries, db().meta, db().teamKeyCache],
       async () => {
         await db().folders.clear();
         await db().entries.clear();
+        await db().teamKeyCache.clear();
         if (exportObj.folders.length)
           await db().folders.bulkPut(exportObj.folders);
         if (exportObj.entries.length)
           await db().entries.bulkPut(exportObj.entries);
+        if (exportObj.teamKeyCache?.length)
+          await db().teamKeyCache.bulkPut(exportObj.teamKeyCache);
         const adopted: VaultMeta = {
           ...meta,
           email,
@@ -329,12 +332,15 @@ export async function cloudSignInFresh(
 
   await db().transaction(
     "rw",
-    [db().folders, db().entries, db().meta],
+    [db().folders, db().entries, db().meta, db().teamKeyCache],
     async () => {
       await db().folders.clear();
       await db().entries.clear();
+      await db().teamKeyCache.clear();
       if (exportObj.folders.length) await db().folders.bulkPut(exportObj.folders);
       if (exportObj.entries.length) await db().entries.bulkPut(exportObj.entries);
+      if (exportObj.teamKeyCache?.length)
+        await db().teamKeyCache.bulkPut(exportObj.teamKeyCache);
       await db().meta.put(meta);
     },
   );
@@ -396,6 +402,7 @@ export async function pushLocalVault(vaultKey: CryptoKey): Promise<VaultMeta> {
 
   const folders = await db().folders.toArray();
   const entries = await db().entries.toArray();
+  const teamKeyCache = await db().teamKeyCache.toArray();
   const exportObj: EncryptedExport = {
     format: "vault-authenticator",
     version: EXPORT_VERSION,
@@ -404,6 +411,7 @@ export async function pushLocalVault(vaultKey: CryptoKey): Promise<VaultMeta> {
     kdf: meta.kdf,
     keyCheck: meta.keyCheck,
     identity: meta.identity,
+    teamKeyCache,
     folders,
     entries,
   };
@@ -483,12 +491,19 @@ export async function pullRemoteVault(
 
   await db().transaction(
     "rw",
-    [db().folders, db().entries, db().meta],
+    [db().folders, db().entries, db().meta, db().teamKeyCache],
     async () => {
       await db().folders.clear();
       await db().entries.clear();
       if (exportObj.folders.length) await db().folders.bulkPut(exportObj.folders);
       if (exportObj.entries.length) await db().entries.bulkPut(exportObj.entries);
+      // Only replace the cache when the blob carries one, so an older push
+      // (pre-cache) doesn't wipe keys this device already holds.
+      if (exportObj.teamKeyCache) {
+        await db().teamKeyCache.clear();
+        if (exportObj.teamKeyCache.length)
+          await db().teamKeyCache.bulkPut(exportObj.teamKeyCache);
+      }
       const updated: VaultMeta = {
         ...meta,
         kdf: exportObj.kdf,

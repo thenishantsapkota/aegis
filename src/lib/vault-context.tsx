@@ -329,14 +329,33 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (vk) {
         try {
           const res = await pullRemoteVault(vk);
-          if (res.applied) metaRef.current = res.meta;
+          if (res.applied) {
+            metaRef.current = res.meta;
+            // The cloud is authoritative for the shared team identity. If the
+            // pull brought one down, adopt its private key and re-derive team
+            // keys — otherwise a second device using this account would be
+            // stuck on its own keypair and unable to unwrap team grants.
+            if (res.meta.identity) {
+              try {
+                privateKeyRef.current = await unwrapPrivateKey(
+                  res.meta.identity,
+                  vk,
+                );
+                await hydrateTeams();
+              } catch (e) {
+                console.warn("[teams] adopting cloud identity failed:", e);
+              }
+            }
+          }
         } catch (e) {
           console.warn("[sync] personal pull on login failed:", e);
         }
       }
-      if (meta.identity) {
+      // Publish the (possibly just-adopted) public key so teammates can grant us.
+      const pubIdentity = metaRef.current?.identity;
+      if (pubIdentity) {
         try {
-          await publishPublicKey(meta.identity);
+          await publishPublicKey(pubIdentity);
         } catch (e) {
           console.warn("[teams] publishPublicKey failed:", e);
         }
@@ -612,6 +631,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
     // Publishing must succeed here (teammates need our key).
     await publishPublicKey(identity);
+    // Also persist the identity into the synced personal vault so every other
+    // device on this account adopts the SAME keypair (otherwise each device
+    // makes its own and can't unwrap the others' team grants).
+    try {
+      const updated = await pushLocalVault(keyRef.current);
+      metaRef.current = updated;
+    } catch (e) {
+      console.warn("[teams] pushing identity to cloud failed:", e);
+    }
     return identity;
   }, [ensureIdentityLocal]);
 

@@ -9,6 +9,7 @@
 
 import type { EncryptedBlob, KdfParams } from "./crypto";
 import type { EntryRecord, EntrySecret, Folder } from "./db";
+import type { Identity } from "./team-crypto";
 
 export const EXPORT_VERSION = 1;
 
@@ -19,6 +20,10 @@ export type EncryptedExport = {
   email: string | null;
   kdf: KdfParams;
   keyCheck: EncryptedBlob;
+  // Shared team identity (RSA keypair, private key wrapped by the vault key).
+  // Synced so every device with this account uses the SAME keypair — otherwise
+  // team key grants wrapped to one device can't be unwrapped on another.
+  identity?: Identity | null;
   folders: Folder[];
   entries: Array<Omit<EntryRecord, "createdAt" | "updatedAt"> & {
     createdAt: number;

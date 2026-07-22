@@ -227,9 +227,10 @@ export async function cloudSignInExisting(
           // Biometric binding on this device wrapped the OLD vault key, so it
           // can no longer unwrap correctly. Force re-enroll.
           biometric: null,
-          // Same story for the team identity — its private key was wrapped with
-          // the old vault key. Regenerate on next unlock (re-grants needed).
-          identity: null,
+          // Adopt the cloud's shared team identity (its private key is wrapped
+          // with the cloud vault key, which we now use). Falls back to null if
+          // the cloud vault predates identity sync — one is created on demand.
+          identity: exportObj.identity ?? null,
         };
         await db().meta.put(adopted);
       },
@@ -321,7 +322,9 @@ export async function cloudSignInFresh(
     sessionToken: "appwrite",
     userId: user.$id,
     biometric: null,
-    identity: null,
+    // Adopt the shared team identity from the cloud vault (created on demand if
+    // this account predates identity sync).
+    identity: exportObj.identity ?? null,
   };
 
   await db().transaction(
@@ -400,6 +403,7 @@ export async function pushLocalVault(vaultKey: CryptoKey): Promise<VaultMeta> {
     email: meta.email,
     kdf: meta.kdf,
     keyCheck: meta.keyCheck,
+    identity: meta.identity,
     folders,
     entries,
   };
@@ -490,6 +494,8 @@ export async function pullRemoteVault(
         kdf: exportObj.kdf,
         keyCheck: exportObj.keyCheck,
         email: exportObj.email ?? meta.email,
+        // Cloud is the source of truth for the shared team identity.
+        identity: exportObj.identity ?? meta.identity,
         remoteVersion: row.version,
         lastSyncedAt: Date.now(),
       };

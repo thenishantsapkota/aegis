@@ -139,6 +139,7 @@ export async function cloudSignUpFresh(
     sessionToken: "appwrite",
     userId: user.$id,
     biometric: null,
+    identity: null,
   };
   await db().meta.put(initialMeta);
 
@@ -226,6 +227,9 @@ export async function cloudSignInExisting(
           // Biometric binding on this device wrapped the OLD vault key, so it
           // can no longer unwrap correctly. Force re-enroll.
           biometric: null,
+          // Same story for the team identity — its private key was wrapped with
+          // the old vault key. Regenerate on next unlock (re-grants needed).
+          identity: null,
         };
         await db().meta.put(adopted);
       },
@@ -317,6 +321,7 @@ export async function cloudSignInFresh(
     sessionToken: "appwrite",
     userId: user.$id,
     biometric: null,
+    identity: null,
   };
 
   await db().transaction(

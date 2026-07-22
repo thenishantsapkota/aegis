@@ -147,7 +147,7 @@ function BottomNav() {
       style={{ paddingBottom: "max(0.75rem, var(--safe-bottom))" }}
     >
       <nav
-        className="pointer-events-auto mx-auto max-w-sm mx-4 grid grid-cols-3 gap-1 p-1.5 rounded-full"
+        className="pointer-events-auto mx-auto max-w-sm grid grid-cols-3 gap-1 p-1.5 rounded-full"
         style={{
           background: "rgb(15 19 32 / 0.92)",
           border: "1px solid rgb(255 255 255 / 0.10)",

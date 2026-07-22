@@ -1,16 +1,27 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { Copy, Check, MoreHorizontal } from "lucide-react";
-import type { EntryRecord, EntrySecret } from "~/lib/db";
+import { Copy, Check, MoreHorizontal, Users } from "lucide-react";
+import type { EntryRecord, EntrySecret, TeamEntryRecord } from "~/lib/db";
 import { generateCode, totpRemainingSeconds } from "~/lib/totp";
 import { useVault } from "~/lib/vault-context";
 import { cn } from "~/lib/cn";
 
+// A card renders either a personal entry or a shared team entry. They share the
+// same visible fields; only the decrypt path and the badge differ.
+type AnyEntry = EntryRecord | TeamEntryRecord;
+
 type Props = {
-  entry: EntryRecord;
-  onEdit?: (e: EntryRecord) => void;
+  entry: AnyEntry;
+  onEdit?: (e: AnyEntry) => void;
   folderName?: string;
   folderColor?: string;
+  // When set, the card is a shared team code and decrypts with the team key.
+  teamName?: string;
+  teamColor?: string;
 };
+
+function isTeamEntry(e: AnyEntry): e is TeamEntryRecord {
+  return "teamId" in e;
+}
 
 // One shared timer drives every card on screen — avoids N setIntervals per
 // vault and keeps the per-second work O(subscribers) instead of O(intervals).
@@ -32,8 +43,15 @@ function subscribe(fn: () => void) {
   };
 }
 
-function CodeCardBase({ entry, onEdit, folderName, folderColor }: Props) {
-  const { decryptEntry } = useVault();
+function CodeCardBase({
+  entry,
+  onEdit,
+  folderName,
+  folderColor,
+  teamName,
+  teamColor,
+}: Props) {
+  const { decryptEntry, decryptTeamEntry } = useVault();
   const [secret, setSecret] = useState<EntrySecret | null>(null);
   const [code, setCode] = useState<string>("••• •••");
   const [remaining, setRemaining] = useState<number>(30);
@@ -42,17 +60,18 @@ function CodeCardBase({ entry, onEdit, folderName, folderColor }: Props) {
 
   useEffect(() => {
     let alive = true;
-    decryptEntry(entry)
-      .then((s) => {
-        if (alive) setSecret(s);
-      })
-      .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : "Decrypt failed");
-      });
+    const p = isTeamEntry(entry)
+      ? decryptTeamEntry(entry)
+      : decryptEntry(entry);
+    p.then((s) => {
+      if (alive) setSecret(s);
+    }).catch((e) => {
+      if (alive) setError(e instanceof Error ? e.message : "Decrypt failed");
+    });
     return () => {
       alive = false;
     };
-  }, [entry, decryptEntry]);
+  }, [entry, decryptEntry, decryptTeamEntry]);
 
   useEffect(() => {
     if (!secret) return;
@@ -118,6 +137,19 @@ function CodeCardBase({ entry, onEdit, folderName, folderColor }: Props) {
           <span className="text-[11px] text-muted truncate font-semibold uppercase tracking-[0.08em]">
             {entry.issuer || "—"}
           </span>
+          {teamName && (
+            <span
+              className="inline-flex items-center gap-1 shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal"
+              style={{
+                background: `${teamColor ?? "#7c86ff"}22`,
+                borderColor: `${teamColor ?? "#7c86ff"}55`,
+                color: teamColor ?? "#7c86ff",
+              }}
+            >
+              <Users size={10} />
+              <span className="truncate max-w-[7rem]">{teamName}</span>
+            </span>
+          )}
           {folderName && (
             <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-white/[0.06] border border-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-muted normal-case tracking-normal">
               {folderColor && (
@@ -223,6 +255,7 @@ export const CodeCard = memo(CodeCardBase, (a, b) => {
   if (a.onEdit !== b.onEdit) return false;
   if (a.folderName !== b.folderName || a.folderColor !== b.folderColor)
     return false;
+  if (a.teamName !== b.teamName || a.teamColor !== b.teamColor) return false;
   const ae = a.entry;
   const be = b.entry;
   return (
@@ -230,6 +263,7 @@ export const CodeCard = memo(CodeCardBase, (a, b) => {
     ae.issuer === be.issuer &&
     ae.account === be.account &&
     ae.updatedAt === be.updatedAt &&
-    ae.folderId === be.folderId
+    ("folderId" in ae ? ae.folderId : null) ===
+      ("folderId" in be ? be.folderId : null)
   );
 });

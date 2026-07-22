@@ -1,65 +1,142 @@
 import { useEffect, useState } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
-import { AlertTriangle, Trash2, X } from "lucide-react";
-import { db, type EntryRecord, type EntrySecret, type Folder } from "~/lib/db";
+import { AlertTriangle, ArrowRightLeft, Trash2, Users, X } from "lucide-react";
+import {
+  type EntryRecord,
+  type EntrySecret,
+  type TeamEntryRecord,
+} from "~/lib/db";
 import { useVault } from "~/lib/vault-context";
+import {
+  DestinationSelect,
+  destForFolder,
+  destForTeam,
+  parseDest,
+  TeamFolderPicker,
+  useDestinations,
+} from "./DestinationSelect";
 
-// Rename / re-folder / delete an existing entry.
-// Edits go through saveEntry(), which re-encrypts the payload and triggers
-// the debounced auto-sync — so the rename lands on the cloud (and other
-// devices) within ~2s.
+// Rename / re-file / move / delete an existing entry (personal or team).
+// Editing in place re-encrypts and syncs. Changing the destination across the
+// personal/team boundary (or between teams) MOVES the code: it's re-created in
+// the target vault with a fresh id, then removed from the source.
+
+type AnyEntry = EntryRecord | TeamEntryRecord;
+
+function isTeamEntry(e: AnyEntry): e is TeamEntryRecord {
+  return "teamId" in e;
+}
 
 export function EditEntryDialog({
   entry,
   onClose,
 }: {
-  entry: EntryRecord;
+  entry: AnyEntry;
   onClose: () => void;
 }) {
-  const { saveEntry, decryptEntry, deleteEntry } = useVault();
-  const folders =
-    useLiveQuery<Folder[]>(
-      () => db().folders.orderBy("sortOrder").toArray(),
-      [],
-    ) ?? [];
+  const {
+    saveEntry,
+    decryptEntry,
+    deleteEntry,
+    saveTeamEntry,
+    decryptTeamEntry,
+    deleteTeamEntry,
+  } = useVault();
+  const { folders, writableTeams } = useDestinations();
+  const isTeam = isTeamEntry(entry);
+
+  const initialDest = isTeamEntry(entry)
+    ? destForTeam(entry.teamId)
+    : destForFolder(entry.folderId);
+  const initialTeamFolderId = isTeamEntry(entry) ? (entry.folderId ?? "") : "";
 
   const [issuer, setIssuer] = useState(entry.issuer);
   const [account, setAccount] = useState(entry.account);
-  const [folderId, setFolderId] = useState(entry.folderId ?? "");
+  const [dest, setDest] = useState(initialDest);
+  const [teamFolderId, setTeamFolderId] = useState(initialTeamFolderId);
   const [secret, setSecret] = useState<EntrySecret | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  // We need the decrypted secret to re-encrypt with new metadata on save.
+  // We need the decrypted secret to re-encrypt with new metadata / new vault.
   useEffect(() => {
     let alive = true;
-    decryptEntry(entry)
-      .then((s) => {
-        if (alive) setSecret(s);
-      })
-      .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : "Decrypt failed");
-      });
+    const p = isTeamEntry(entry)
+      ? decryptTeamEntry(entry)
+      : decryptEntry(entry);
+    p.then((s) => {
+      if (alive) setSecret(s);
+    }).catch((e) => {
+      if (alive) setError(e instanceof Error ? e.message : "Decrypt failed");
+    });
     return () => {
       alive = false;
     };
-  }, [entry, decryptEntry]);
+  }, [entry, decryptEntry, decryptTeamEntry]);
+
+  const target = parseDest(dest);
+  // A "move" crosses the personal/team boundary or switches teams. Staying
+  // personal (even changing folder) or staying in the same team is in-place.
+  const isMove = isTeamEntry(entry)
+    ? target.kind !== "team" || target.teamId !== entry.teamId
+    : target.kind === "team";
 
   async function onSave() {
     if (!secret) return;
     setBusy(true);
     setError(null);
     try {
-      await saveEntry({
-        id: entry.id,
-        folderId: folderId || null,
-        issuer: issuer.trim(),
-        account: account.trim(),
-        iconHint: entry.iconHint ?? null,
-        secret,
-        sortOrder: entry.sortOrder,
-      });
+      if (!isMove) {
+        // In-place edit.
+        if (target.kind === "team") {
+          await saveTeamEntry(target.teamId, {
+            id: entry.id,
+            folderId: teamFolderId || null,
+            issuer: issuer.trim(),
+            account: account.trim(),
+            iconHint: entry.iconHint ?? null,
+            secret,
+            sortOrder: entry.sortOrder,
+          });
+        } else {
+          await saveEntry({
+            id: entry.id,
+            folderId: target.folderId,
+            issuer: issuer.trim(),
+            account: account.trim(),
+            iconHint: entry.iconHint ?? null,
+            secret,
+            sortOrder: entry.sortOrder,
+          });
+        }
+      } else {
+        // Move: create in the target vault (fresh id), then delete the source.
+        if (target.kind === "team") {
+          await saveTeamEntry(target.teamId, {
+            folderId: teamFolderId || null,
+            issuer: issuer.trim(),
+            account: account.trim(),
+            iconHint: entry.iconHint ?? null,
+            secret,
+          });
+        } else {
+          await saveEntry(
+            {
+              folderId: target.folderId,
+              issuer: issuer.trim(),
+              account: account.trim(),
+              iconHint: entry.iconHint ?? null,
+              secret,
+            },
+            { immediateSync: true },
+          );
+        }
+        if (isTeamEntry(entry)) {
+          await deleteTeamEntry(entry.teamId, entry.id);
+        } else {
+          await deleteEntry(entry.id);
+        }
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -71,17 +148,32 @@ export function EditEntryDialog({
   async function onDelete() {
     setBusy(true);
     try {
-      await deleteEntry(entry.id);
+      if (isTeamEntry(entry)) {
+        await deleteTeamEntry(entry.teamId, entry.id);
+      } else {
+        await deleteEntry(entry.id);
+      }
       onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setBusy(false);
     }
   }
 
+  // Folder change within the SAME team (not a move) still counts as an edit.
+  const sameTeam =
+    target.kind === "team" &&
+    isTeamEntry(entry) &&
+    target.teamId === entry.teamId;
+  const folderChanged =
+    target.kind === "team" &&
+    teamFolderId !== (sameTeam ? initialTeamFolderId : "");
   const dirty =
     issuer.trim() !== entry.issuer ||
     account.trim() !== entry.account ||
-    (folderId || null) !== (entry.folderId ?? null);
+    dest !== initialDest ||
+    folderChanged;
 
   return (
     <div
@@ -96,7 +188,10 @@ export function EditEntryDialog({
         }}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
-          <h2 className="text-lg font-semibold">Edit entry</h2>
+          <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+            {isTeam && <Users size={16} className="text-accent" />}
+            {isTeam ? "Edit shared code" : "Edit entry"}
+          </h2>
           <button
             onClick={onClose}
             className="w-9 h-9 rounded-2xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white"
@@ -133,21 +228,43 @@ export function EditEntryDialog({
               inputMode="email"
             />
           </div>
-          <div>
-            <label className="label">Folder</label>
-            <select
-              className="input"
-              value={folderId}
-              onChange={(e) => setFolderId(e.target.value)}
-            >
-              <option value="">Unfiled</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </div>
+
+          <DestinationSelect
+            folders={folders}
+            teams={writableTeams}
+            value={dest}
+            onChange={(v) => {
+              setDest(v);
+              const t = parseDest(v);
+              setTeamFolderId(
+                t.kind === "team" &&
+                  isTeamEntry(entry) &&
+                  t.teamId === entry.teamId
+                  ? initialTeamFolderId
+                  : "",
+              );
+            }}
+            label="Location"
+          />
+
+          {target.kind === "team" && (
+            <TeamFolderPicker
+              teamId={target.teamId}
+              value={teamFolderId}
+              onChange={setTeamFolderId}
+            />
+          )}
+
+          {isMove && (
+            <div className="flex items-start gap-2 text-xs text-accent">
+              <ArrowRightLeft size={14} className="mt-0.5 shrink-0" />
+              <span>
+                {target.kind === "team"
+                  ? "This will move the code into the team and share it with all members (encrypted with the team key)."
+                  : "This will move the code out of the team and back into your personal vault."}
+              </span>
+            </div>
+          )}
 
           {error && (
             <div className="flex items-start gap-2 text-sm text-danger">
@@ -171,7 +288,7 @@ export function EditEntryDialog({
               className="btn-primary flex-1"
               disabled={busy || !dirty || !secret}
             >
-              {busy ? "Saving…" : "Save"}
+              {busy ? "Saving…" : isMove ? "Move" : "Save"}
             </button>
           </div>
 

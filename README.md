@@ -23,6 +23,7 @@ Installable on iOS, Android, and desktop.
 - ✍️ Manual entry with full TOTP/HOTP parameters
 - 📤 Encrypted file export/import for moving between devices
 - ☁️ Optional zero-knowledge cloud sync via Appwrite (server stores only ciphertext)
+- 👥 Team (shared) OTP codes — end-to-end encrypted with a per-team key shared via public-key envelopes
 - 📱 Works on iOS, Android, and desktop as an installable PWA
 - 🌚 Auto-locks when the app is backgrounded for 5+ minutes
 - 🌓 Safe-area aware (iOS notch, Android gesture bar)
@@ -35,6 +36,13 @@ Installable on iOS, Android, and desktop.
 - Salts are 16 random bytes (local) and SHA-256 of `email` (cloud auth) — the latter is deterministic so a fresh device can sign in without a round trip
 - Folder names and issuer/account labels are stored in plaintext **on-device only**; when synced, the entire vault including labels is encrypted before upload
 - A wrong password produces a decrypt failure — there is no recoverable backup. Save your password in a password manager.
+
+**Team codes** add public-key envelope encryption on top:
+
+- Each user has an RSA-OAEP keypair. The private key is wrapped with that user's `vaultKey` and stored in vault metadata; the public key is published in cleartext.
+- Each team has a random AES-256 `teamKey` that encrypts the team's codes. Membership is a "grant": `teamKey` wrapped to each member's public key. Only that member's private key can unwrap it — the plaintext team key never reaches the server.
+- Removing a member rotates the team key (re-encrypt + re-grant), so a removed member's cached key stops working for future changes.
+- Because your private key is derived from your master password, losing the password also means losing team access — you'd need to be re-invited after resetting.
 
 ## Getting started
 
@@ -69,6 +77,58 @@ Skip this section if you only want local + file-based export.
 
    > Appwrite renamed Collections → Tables in their newer SDKs. If you're on an older build
    > that still uses Collections, the env var `VITE_APPWRITE_COLLECTION_VAULTS` is also accepted.
+
+### 2b. (Optional) Enable team (shared) OTP codes
+
+Teams let several people share a set of OTP codes while keeping zero-knowledge:
+each team has its own random AES key, and a copy of that key is wrapped to every
+member's public key. The plaintext team key never touches the server. This uses
+Appwrite's native **Teams** feature plus three extra tables in the `vault` database.
+
+1. **Auth → Teams** is enabled by default in Appwrite — no toggle needed. Members,
+   roles (`owner` / `admin` / `member`) and email invites are handled here.
+2. Add these three **Tables** to the `vault` database. For all of them, set
+   **Row Security: Enabled** and give the **Users** role only the **Create**
+   action (per-row permissions are set by the client — including team-scoped
+   ones like "team members can read", which the app writes at creation time).
+
+   **`publicKeys`** — one row per user, holding their RSA public key.
+   - `userId` — String, size 64, required
+   - `publicKeyJwk` — String, size **4000**, required
+
+   **`teamVaults`** — one row per team, holding the encrypted shared codes.
+   - `teamId` — String, size 64, required
+   - `cipherText` — String, size **5,000,000**, required
+   - `version` — Integer, required
+   - `keyEpoch` — Integer, required (bumps when the team key is rotated)
+
+   **`teamKeyGrants`** — one row per (team, member), the team key wrapped to that member.
+   - `teamId` — String, size 64, required (add an **index** on this attribute)
+   - `userId` — String, size 64, required (add an **index** on this attribute)
+   - `wrappedKey` — String, size **2000**, required
+   - `keyEpoch` — Integer, required
+
+3. Add the table IDs to `.env`:
+
+   ```
+   VITE_APPWRITE_TABLE_PUBLIC_KEYS=publicKeys
+   VITE_APPWRITE_TABLE_TEAM_VAULTS=teamVaults
+   VITE_APPWRITE_TABLE_TEAM_GRANTS=teamKeyGrants
+   ```
+
+**How sharing works day to day**
+
+- Open **Teams** (the people icon on the home screen) → **Create a team**. You
+  become its owner and get the team key.
+- **Invite by email.** Appwrite emails the person an accept link. They must have
+  (or create) an Aegis cloud account with that same email. When they accept and
+  open Aegis, their public key is published; the next time an owner/admin opens
+  Teams and refreshes, the team key is granted to them automatically.
+- **Add shared codes** from **Add → Save to → (your team)**. Only owners/admins
+  can add or edit shared codes; members can view and use them.
+- **Removing a member rotates the team key**: the shared vault is re-encrypted
+  and re-granted to everyone remaining, so the removed member's cached key is
+  useless going forward.
 
 ### 3. Run
 

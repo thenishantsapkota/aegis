@@ -25,6 +25,8 @@ import {
   newId,
   type EntryRecord,
   type EntrySecret,
+  type TeamEntryRecord,
+  type TeamFolder,
   type VaultMeta,
 } from "./db";
 import {
@@ -34,6 +36,19 @@ import {
 } from "./biometric";
 import { cloudSignUpFresh, pullRemoteVault, pushLocalVault } from "./sync";
 import { isAppwriteConfigured } from "./appwrite";
+import {
+  createIdentity,
+  unwrapPrivateKey,
+  type Identity,
+} from "./team-crypto";
+import {
+  publishPublicKey,
+  pullTeamVault,
+  pushTeamVault,
+  reconcilePendingGrants,
+  syncMyTeams,
+  unwrapTeamKeyFor,
+} from "./teams";
 
 type VaultState =
   | { status: "loading" }
@@ -84,6 +99,44 @@ type VaultCtx = {
   decryptEntry: (entry: EntryRecord) => Promise<EntrySecret>;
   /** Decrypt all entries (for export). */
   decryptAll: (entries: EntryRecord[]) => Promise<Map<string, EntrySecret>>;
+
+  // ---- Teams (shared vaults) ----
+  /** Ensure this device has a published asymmetric identity (needed for teams). */
+  ensureIdentity: () => Promise<Identity>;
+  /** The in-memory RSA private key (null when locked or no identity). */
+  getPrivateKey: () => CryptoKey | null;
+  /** The in-memory AES key for a team (undefined if not granted / not loaded). */
+  getTeamKey: (teamId: string) => CryptoKey | undefined;
+  /** Stash a team key in memory after create/rotate. */
+  setTeamKey: (teamId: string, key: CryptoKey) => void;
+  /** Pull team list from cloud, unwrap keys, pull each team's codes, grant pending members. */
+  refreshTeams: () => Promise<void>;
+  /** True once at least one team key is loaded in memory. */
+  hasTeamAccess: (teamId: string) => boolean;
+  /** Encrypt + persist a team entry, then push to the team vault. */
+  saveTeamEntry: (
+    teamId: string,
+    input: {
+      id?: string;
+      folderId?: string | null;
+      issuer: string;
+      account: string;
+      iconHint?: string | null;
+      secret: EntrySecret;
+      sortOrder?: number;
+    },
+  ) => Promise<TeamEntryRecord>;
+  /** Delete a team entry, then push. */
+  deleteTeamEntry: (teamId: string, id: string) => Promise<void>;
+  /** Decrypt a single team entry's secret. */
+  decryptTeamEntry: (entry: TeamEntryRecord) => Promise<EntrySecret>;
+  /** Create/rename/recolor a folder inside a team, then push. */
+  saveTeamFolder: (
+    teamId: string,
+    input: { id?: string; name: string; color: string; sortOrder?: number },
+  ) => Promise<TeamFolder>;
+  /** Delete a team folder (its codes become unfiled), then push. */
+  deleteTeamFolder: (teamId: string, id: string) => Promise<void>;
 };
 
 const Ctx = createContext<VaultCtx | null>(null);
@@ -115,6 +168,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<VaultState>({ status: "loading" });
   const keyRef = useRef<CryptoKey | null>(null);
   const metaRef = useRef<VaultMeta | null>(null);
+  // Team crypto held in memory only while unlocked.
+  const privateKeyRef = useRef<CryptoKey | null>(null);
+  const teamKeysRef = useRef<Map<string, CryptoKey>>(new Map());
   // Used by auto-sync — bumps on every saveEntry, debounce reads/clears it.
   const dirtyRef = useRef<number>(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,6 +201,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ---- shared lock helper ---------------------------------------------------
   const doLock = useCallback(() => {
     keyRef.current = null;
+    privateKeyRef.current = null;
+    teamKeysRef.current = new Map();
     unlockExpiresAtRef.current = null;
     if (autoLockTimerRef.current) {
       clearTimeout(autoLockTimerRef.current);
@@ -224,6 +282,105 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     };
   }, [state.status, backgroundPush]);
 
+  // ---- team crypto helpers --------------------------------------------------
+
+  // Ensure meta.identity exists (create + persist if missing) and load the
+  // private key into memory. Local-only; publishing is separate.
+  const ensureIdentityLocal = useCallback(
+    async (vaultKey: CryptoKey): Promise<Identity | null> => {
+      let meta = metaRef.current ?? (await getMeta()) ?? null;
+      if (!meta) return null;
+      if (!meta.identity) {
+        const identity = await createIdentity(vaultKey);
+        meta = { ...meta, identity };
+        await db().meta.put(meta);
+        metaRef.current = meta;
+      }
+      privateKeyRef.current = await unwrapPrivateKey(meta.identity!, vaultKey);
+      return meta.identity;
+    },
+    [],
+  );
+
+  // Unwrap every locally-known team key into memory using our private key.
+  const hydrateTeams = useCallback(async () => {
+    const pk = privateKeyRef.current;
+    if (!pk) return;
+    const teams = await db().teams.toArray();
+    const map = new Map<string, CryptoKey>();
+    for (const t of teams) {
+      const k = await unwrapTeamKeyFor(t, pk);
+      if (k) map.set(t.id, k);
+    }
+    teamKeysRef.current = map;
+  }, []);
+
+  // Best-effort "get up to date with the cloud" pass: pull the personal vault,
+  // publish our public key, sync the team list, unwrap team keys, and pull each
+  // team's codes (granting pending members if we're an owner/admin). Every step
+  // is guarded so it can never break the caller. Shared by the unlock path and
+  // the explicit refresh button.
+  const doCloudSync = useCallback(
+    async (vaultKey?: CryptoKey) => {
+      const meta = metaRef.current;
+      if (!isAppwriteConfigured() || !meta?.userId) return;
+
+      const vk = vaultKey ?? keyRef.current;
+      if (vk) {
+        try {
+          const res = await pullRemoteVault(vk);
+          if (res.applied) metaRef.current = res.meta;
+        } catch (e) {
+          console.warn("[sync] personal pull on login failed:", e);
+        }
+      }
+      if (meta.identity) {
+        try {
+          await publishPublicKey(meta.identity);
+        } catch (e) {
+          console.warn("[teams] publishPublicKey failed:", e);
+        }
+      }
+      try {
+        await syncMyTeams();
+        await hydrateTeams();
+        const teams = await db().teams.toArray();
+        for (const t of teams) {
+          const key = teamKeysRef.current.get(t.id);
+          if (!key) continue; // no access yet — waiting on an admin grant
+          try {
+            if (t.role === "owner" || t.role === "admin") {
+              await reconcilePendingGrants(t.id, key);
+            }
+            await pullTeamVault(t, key);
+          } catch (e) {
+            console.warn(`[teams] sync failed for ${t.name}:`, e);
+          }
+        }
+      } catch (e) {
+        console.warn("[teams] team sync failed:", e);
+      }
+    },
+    [hydrateTeams],
+  );
+
+  // Run after any successful unlock: prepare identity + team keys locally, then
+  // kick off a one-shot cloud sync in the background so the device lands on the
+  // latest state without blocking the unlock.
+  const afterUnlock = useCallback(
+    async (vaultKey: CryptoKey) => {
+      try {
+        await ensureIdentityLocal(vaultKey);
+        await hydrateTeams();
+      } catch (e) {
+        // Team setup must never block a normal unlock.
+        console.warn("[teams] post-unlock setup failed:", e);
+      }
+      void doCloudSync(vaultKey);
+    },
+    [ensureIdentityLocal, hydrateTeams, doCloudSync],
+  );
+
   // ---- core actions ---------------------------------------------------------
 
   const initialize = useCallback(
@@ -242,14 +399,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         sessionToken: null,
         userId: null,
         biometric: null,
+        identity: null,
       };
       await db().meta.put(meta);
       metaRef.current = meta;
       keyRef.current = key;
       startUnlockWindow();
-      setState(unlockedState(meta));
+      await afterUnlock(key);
+      setState(unlockedState(metaRef.current));
     },
-    [startUnlockWindow],
+    [startUnlockWindow, afterUnlock],
   );
 
   const signUpCloud = useCallback(
@@ -258,9 +417,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       metaRef.current = meta;
       keyRef.current = vaultKey;
       startUnlockWindow();
-      setState(unlockedState(meta));
+      await afterUnlock(vaultKey);
+      setState(unlockedState(metaRef.current));
     },
-    [startUnlockWindow],
+    [startUnlockWindow, afterUnlock],
   );
 
   const unlock = useCallback(
@@ -273,10 +433,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (!ok) return false;
       keyRef.current = key;
       startUnlockWindow();
-      setState(unlockedState(meta));
+      await afterUnlock(key);
+      setState(unlockedState(metaRef.current));
       return true;
     },
-    [startUnlockWindow],
+    [startUnlockWindow, afterUnlock],
   );
 
   const unlockWithBiometric = useCallback(async () => {
@@ -293,9 +454,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
     keyRef.current = key;
     startUnlockWindow();
-    setState(unlockedState(meta));
+    await afterUnlock(key);
+    setState(unlockedState(metaRef.current));
     return true;
-  }, [startUnlockWindow]);
+  }, [startUnlockWindow, afterUnlock]);
 
   const enableBiometric = useCallback(async () => {
     if (!keyRef.current || !metaRef.current) {
@@ -343,6 +505,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const resetLocalVault = useCallback(async () => {
     keyRef.current = null;
+    privateKeyRef.current = null;
+    teamKeysRef.current = new Map();
     metaRef.current = null;
     await db().delete();
     setState({ status: "uninitialized" });
@@ -437,6 +601,147 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     return out;
   }, []);
 
+  // ---- team methods ---------------------------------------------------------
+
+  const ensureIdentity = useCallback<VaultCtx["ensureIdentity"]>(async () => {
+    if (!keyRef.current) throw new Error("Vault is locked");
+    const identity = await ensureIdentityLocal(keyRef.current);
+    if (!identity) throw new Error("No vault on this device");
+    if (!metaRef.current?.userId) {
+      throw new Error("Sign in to cloud sync first — teams require an account.");
+    }
+    // Publishing must succeed here (teammates need our key).
+    await publishPublicKey(identity);
+    return identity;
+  }, [ensureIdentityLocal]);
+
+  const getPrivateKey = useCallback<VaultCtx["getPrivateKey"]>(
+    () => privateKeyRef.current,
+    [],
+  );
+
+  const getTeamKey = useCallback<VaultCtx["getTeamKey"]>(
+    (teamId) => teamKeysRef.current.get(teamId),
+    [],
+  );
+
+  const setTeamKey = useCallback<VaultCtx["setTeamKey"]>((teamId, key) => {
+    teamKeysRef.current.set(teamId, key);
+  }, []);
+
+  const hasTeamAccess = useCallback<VaultCtx["hasTeamAccess"]>(
+    (teamId) => teamKeysRef.current.has(teamId),
+    [],
+  );
+
+  const refreshTeams = useCallback<VaultCtx["refreshTeams"]>(async () => {
+    if (!isAppwriteConfigured() || !metaRef.current?.userId) return;
+    if (!keyRef.current) throw new Error("Vault is locked");
+    // Explicit user action: make sure our identity exists + is published (this
+    // creates it on first use), then run the shared cloud-sync pass.
+    await ensureIdentity();
+    await doCloudSync();
+  }, [ensureIdentity, doCloudSync]);
+
+  const saveTeamEntry = useCallback<VaultCtx["saveTeamEntry"]>(
+    async (teamId, input) => {
+      const key = teamKeysRef.current.get(teamId);
+      if (!key) {
+        throw new Error(
+          "You don't have this team's key yet. Ask an admin to grant access, then pull to refresh.",
+        );
+      }
+      const payload: EncryptedBlob = await encryptJSON(key, input.secret);
+      const now = Date.now();
+      const id = input.id ?? newId();
+      const existing = input.id
+        ? await db().teamEntries.get(input.id)
+        : undefined;
+      const record: TeamEntryRecord = {
+        id,
+        teamId,
+        folderId: input.folderId ?? existing?.folderId ?? null,
+        issuer: input.issuer,
+        account: input.account,
+        iconHint: input.iconHint ?? null,
+        payload,
+        sortOrder: input.sortOrder ?? existing?.sortOrder ?? now,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      await db().teamEntries.put(record);
+      const team = await db().teams.get(teamId);
+      if (team) await pushTeamVault(team, key);
+      return record;
+    },
+    [],
+  );
+
+  const saveTeamFolder = useCallback<VaultCtx["saveTeamFolder"]>(
+    async (teamId, input) => {
+      const key = teamKeysRef.current.get(teamId);
+      if (!key) throw new Error("You don't have this team's key.");
+      const now = Date.now();
+      const id = input.id ?? newId();
+      const existing = input.id
+        ? await db().teamFolders.get(input.id)
+        : undefined;
+      const folder: TeamFolder = {
+        id,
+        teamId,
+        name: input.name,
+        color: input.color,
+        sortOrder: input.sortOrder ?? existing?.sortOrder ?? now,
+        createdAt: existing?.createdAt ?? now,
+      };
+      await db().teamFolders.put(folder);
+      const team = await db().teams.get(teamId);
+      if (team) await pushTeamVault(team, key);
+      return folder;
+    },
+    [],
+  );
+
+  const deleteTeamFolder = useCallback<VaultCtx["deleteTeamFolder"]>(
+    async (teamId, id) => {
+      const key = teamKeysRef.current.get(teamId);
+      if (!key) throw new Error("You don't have this team's key.");
+      await db().transaction("rw", db().teamEntries, db().teamFolders, async () => {
+        await db().teamFolders.delete(id);
+        const inFolder = await db()
+          .teamEntries.where("folderId")
+          .equals(id)
+          .toArray();
+        for (const e of inFolder) {
+          await db().teamEntries.update(e.id, { folderId: null });
+        }
+      });
+      const team = await db().teams.get(teamId);
+      if (team) await pushTeamVault(team, key);
+    },
+    [],
+  );
+
+  const deleteTeamEntry = useCallback<VaultCtx["deleteTeamEntry"]>(
+    async (teamId, id) => {
+      const key = teamKeysRef.current.get(teamId);
+      if (!key) throw new Error("You don't have this team's key.");
+      await db().teamEntries.delete(id);
+      const team = await db().teams.get(teamId);
+      if (team) await pushTeamVault(team, key);
+    },
+    [],
+  );
+
+  const decryptTeamEntry = useCallback<VaultCtx["decryptTeamEntry"]>(
+    async (entry) => {
+      const key = teamKeysRef.current.get(entry.teamId);
+      if (!key) throw new Error("No key loaded for this team");
+      return decryptJSON<EntrySecret>(key, entry.payload);
+    },
+    [],
+  );
+
   const value = useMemo<VaultCtx>(
     () => ({
       state,
@@ -455,6 +760,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       pullNow,
       decryptEntry,
       decryptAll,
+      ensureIdentity,
+      getPrivateKey,
+      getTeamKey,
+      setTeamKey,
+      refreshTeams,
+      hasTeamAccess,
+      saveTeamEntry,
+      deleteTeamEntry,
+      decryptTeamEntry,
+      saveTeamFolder,
+      deleteTeamFolder,
     }),
     [
       state,
@@ -473,6 +789,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       pullNow,
       decryptEntry,
       decryptAll,
+      ensureIdentity,
+      getPrivateKey,
+      getTeamKey,
+      setTeamKey,
+      refreshTeams,
+      hasTeamAccess,
+      saveTeamEntry,
+      deleteTeamEntry,
+      decryptTeamEntry,
+      saveTeamFolder,
+      deleteTeamFolder,
     ],
   );
 

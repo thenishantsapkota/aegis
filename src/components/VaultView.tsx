@@ -1,8 +1,16 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { FolderPlus, Plus, Search } from "lucide-react";
-import { db, type EntryRecord, type Folder } from "~/lib/db";
+import { FolderPlus, Plus, Search, Users } from "lucide-react";
+import {
+  db,
+  type EntryRecord,
+  type Folder,
+  type TeamEntryRecord,
+  type TeamFolder,
+  type TeamRecord,
+} from "~/lib/db";
+import { useVault } from "~/lib/vault-context";
 import { CodeCard } from "./CodeCard";
 import { EditEntryDialog } from "./EditEntryDialog";
 import { FolderManagerDialog } from "./FolderManagerDialog";
@@ -10,8 +18,15 @@ import { cn } from "~/lib/cn";
 
 const ALL_FOLDERS = "__all__";
 const UNFILED = "__unfiled__";
+const TEAM_PREFIX = "team:";
+
+type AnyEntry = EntryRecord | TeamEntryRecord;
+type RenderItem =
+  | { kind: "personal"; entry: EntryRecord; folder?: Folder }
+  | { kind: "team"; entry: TeamEntryRecord; team: TeamRecord; folder?: TeamFolder };
 
 export function VaultView() {
+  const { hasTeamAccess } = useVault();
   const folders =
     useLiveQuery<Folder[]>(
       () => db().folders.orderBy("sortOrder").toArray(),
@@ -22,40 +37,135 @@ export function VaultView() {
       () => db().entries.orderBy("sortOrder").toArray(),
       [],
     ) ?? [];
+  const teams =
+    useLiveQuery<TeamRecord[]>(() => db().teams.toArray(), []) ?? [];
+  const teamEntries =
+    useLiveQuery<TeamEntryRecord[]>(
+      () => db().teamEntries.orderBy("sortOrder").toArray(),
+      [],
+    ) ?? [];
+  const teamFolders =
+    useLiveQuery<TeamFolder[]>(
+      () => db().teamFolders.orderBy("sortOrder").toArray(),
+      [],
+    ) ?? [];
 
-  const [activeFolder, setActiveFolder] = useState<string>(ALL_FOLDERS);
+  const [activeFolder, setActiveFolderRaw] = useState<string>(ALL_FOLDERS);
+  // Sub-filter within a selected team (ALL / UNFILED / a team-folder id).
+  const [activeTeamFolder, setActiveTeamFolder] = useState<string>(ALL_FOLDERS);
   const [search, setSearch] = useState("");
   const [showFolderManager, setShowFolderManager] = useState(false);
-  const [editing, setEditing] = useState<EntryRecord | null>(null);
+  const [editing, setEditing] = useState<AnyEntry | null>(null);
 
-  const filtered = useMemo(() => {
-    let list = entries;
-    if (activeFolder === UNFILED) {
-      list = list.filter((e) => !e.folderId);
-    } else if (activeFolder !== ALL_FOLDERS) {
-      list = list.filter((e) => e.folderId === activeFolder);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (e) =>
-          e.issuer.toLowerCase().includes(q) ||
-          e.account.toLowerCase().includes(q),
-      );
-    }
-    return list;
-  }, [entries, activeFolder, search]);
-
-  const unfiledCount = entries.filter((e) => !e.folderId).length;
-  const hasFolders = folders.length > 0;
+  // Switching the top-level filter resets the team sub-folder filter.
+  const setActiveFolder = (v: string) => {
+    setActiveFolderRaw(v);
+    setActiveTeamFolder(ALL_FOLDERS);
+  };
 
   const folderById = useMemo(
     () => new Map(folders.map((f) => [f.id, f])),
     [folders],
   );
-  // Folder labels only add information in the mixed "All" view — within a
-  // single folder every card shares it, and unfiled cards have none.
-  const showFolderLabels = activeFolder === ALL_FOLDERS;
+  const teamById = useMemo(
+    () => new Map(teams.map((t) => [t.id, t])),
+    [teams],
+  );
+  const teamFolderById = useMemo(
+    () => new Map(teamFolders.map((f) => [f.id, f])),
+    [teamFolders],
+  );
+
+  const activeTeamId = activeFolder.startsWith(TEAM_PREFIX)
+    ? activeFolder.slice(TEAM_PREFIX.length)
+    : null;
+
+  // Team labels/folder labels only add information in the mixed "All" view.
+  const showLabels = activeFolder === ALL_FOLDERS;
+
+  const items = useMemo<RenderItem[]>(() => {
+    const q = search.trim().toLowerCase();
+    const matches = (e: AnyEntry) =>
+      !q ||
+      e.issuer.toLowerCase().includes(q) ||
+      e.account.toLowerCase().includes(q);
+
+    const out: RenderItem[] = [];
+    const wantTeam = activeFolder.startsWith(TEAM_PREFIX)
+      ? activeFolder.slice(TEAM_PREFIX.length)
+      : null;
+
+    // Personal entries (hidden when a specific team is selected).
+    if (!wantTeam) {
+      let list = entries;
+      if (activeFolder === UNFILED) list = list.filter((e) => !e.folderId);
+      else if (activeFolder !== ALL_FOLDERS)
+        list = list.filter((e) => e.folderId === activeFolder);
+      for (const e of list) {
+        if (!matches(e)) continue;
+        out.push({
+          kind: "personal",
+          entry: e,
+          folder:
+            showLabels && e.folderId ? folderById.get(e.folderId) : undefined,
+        });
+      }
+    }
+
+    // Team entries appear in "All" and in their own team filter.
+    if (activeFolder === ALL_FOLDERS || wantTeam) {
+      for (const e of teamEntries) {
+        if (wantTeam && e.teamId !== wantTeam) continue;
+        const team = teamById.get(e.teamId);
+        if (!team) continue;
+        if (!hasTeamAccess(team.id)) continue; // key not loaded yet
+        if (!matches(e)) continue;
+        // Sub-folder filter, only when viewing a single team.
+        if (wantTeam && activeTeamFolder === UNFILED && e.folderId) continue;
+        if (
+          wantTeam &&
+          activeTeamFolder !== ALL_FOLDERS &&
+          activeTeamFolder !== UNFILED &&
+          e.folderId !== activeTeamFolder
+        )
+          continue;
+        // Show a folder badge in the mixed "All" view or in a team's "All".
+        const labelFolder =
+          (showLabels || (wantTeam && activeTeamFolder === ALL_FOLDERS)) &&
+          e.folderId
+            ? teamFolderById.get(e.folderId)
+            : undefined;
+        out.push({ kind: "team", entry: e, team, folder: labelFolder });
+      }
+    }
+    return out;
+  }, [
+    entries,
+    teamEntries,
+    activeFolder,
+    activeTeamFolder,
+    search,
+    showLabels,
+    folderById,
+    teamById,
+    teamFolderById,
+    hasTeamAccess,
+  ]);
+
+  const unfiledCount = entries.filter((e) => !e.folderId).length;
+  const hasFolders = folders.length > 0;
+
+  const activeTeam = activeTeamId ? teamById.get(activeTeamId) : undefined;
+  const canManageTeamFolders = !!activeTeam && activeTeam.role !== "member";
+  const activeTeamFolders = activeTeamId
+    ? teamFolders.filter((f) => f.teamId === activeTeamId)
+    : [];
+  const activeTeamUnfiled = activeTeamId
+    ? teamEntries.filter((e) => e.teamId === activeTeamId && !e.folderId).length
+    : 0;
+  // The folder button manages the active team's folders when a writable team is
+  // selected; otherwise it manages personal folders.
+  const folderManagerTeamId = canManageTeamFolders ? activeTeamId : null;
 
   return (
     <div className="pt-6 animate-fade-in">
@@ -67,11 +177,18 @@ export function VaultView() {
           <p className="text-sm text-muted mt-1">Codes you carry</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            to="/teams"
+            className="btn-ghost !rounded-full !px-3"
+            aria-label="Teams"
+          >
+            <Users size={18} />
+          </Link>
           <button
             type="button"
             className="btn-ghost !rounded-full !px-3"
             onClick={() => setShowFolderManager(true)}
-            aria-label="Folders"
+            aria-label={folderManagerTeamId ? "Team folders" : "Folders"}
           >
             <FolderPlus size={18} />
           </button>
@@ -121,6 +238,17 @@ export function VaultView() {
               count={entries.filter((e) => e.folderId === f.id).length}
             />
           ))}
+        {teams.map((t) => (
+          <FolderChip
+            key={t.id}
+            active={activeFolder === TEAM_PREFIX + t.id}
+            onClick={() => setActiveFolder(TEAM_PREFIX + t.id)}
+            label={t.name}
+            color={t.color}
+            count={teamEntries.filter((e) => e.teamId === t.id).length}
+            icon={<Users size={11} />}
+          />
+        ))}
         {unfiledCount > 0 && (
           <FolderChip
             active={activeFolder === UNFILED}
@@ -131,33 +259,79 @@ export function VaultView() {
         )}
       </div>
 
+      {/* Second row: folders within the selected team. */}
+      {activeTeamId && (activeTeamFolders.length > 0 || activeTeamUnfiled > 0) && (
+        <div
+          className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-2 mb-2"
+          style={{ scrollbarWidth: "none" }}
+        >
+          <FolderChip
+            active={activeTeamFolder === ALL_FOLDERS}
+            onClick={() => setActiveTeamFolder(ALL_FOLDERS)}
+            label="All"
+            count={teamEntries.filter((e) => e.teamId === activeTeamId).length}
+          />
+          {activeTeamFolders.map((f) => (
+            <FolderChip
+              key={f.id}
+              active={activeTeamFolder === f.id}
+              onClick={() => setActiveTeamFolder(f.id)}
+              label={f.name}
+              color={f.color}
+              count={
+                teamEntries.filter(
+                  (e) => e.teamId === activeTeamId && e.folderId === f.id,
+                ).length
+              }
+            />
+          ))}
+          {activeTeamUnfiled > 0 && (
+            <FolderChip
+              active={activeTeamFolder === UNFILED}
+              onClick={() => setActiveTeamFolder(UNFILED)}
+              label="Unfiled"
+              count={activeTeamUnfiled}
+            />
+          )}
+        </div>
+      )}
+
       <div className="space-y-2.5 mt-3">
-        {filtered.length === 0 ? (
+        {items.length === 0 ? (
           <EmptyState
-            empty={entries.length === 0}
+            empty={entries.length === 0 && teamEntries.length === 0}
             search={search.trim() !== ""}
           />
         ) : (
-          filtered.map((e) => {
-            const folder =
-              showFolderLabels && e.folderId
-                ? folderById.get(e.folderId)
-                : undefined;
-            return (
+          items.map((item) =>
+            item.kind === "team" ? (
               <CodeCard
-                key={e.id}
-                entry={e}
+                key={`t_${item.entry.id}`}
+                entry={item.entry}
                 onEdit={setEditing}
-                folderName={folder?.name}
-                folderColor={folder?.color}
+                teamName={showLabels ? item.team.name : undefined}
+                teamColor={item.team.color}
+                folderName={item.folder?.name}
+                folderColor={item.folder?.color}
               />
-            );
-          })
+            ) : (
+              <CodeCard
+                key={item.entry.id}
+                entry={item.entry}
+                onEdit={setEditing}
+                folderName={item.folder?.name}
+                folderColor={item.folder?.color}
+              />
+            ),
+          )
         )}
       </div>
 
       {showFolderManager && (
-        <FolderManagerDialog onClose={() => setShowFolderManager(false)} />
+        <FolderManagerDialog
+          teamId={folderManagerTeamId ?? undefined}
+          onClose={() => setShowFolderManager(false)}
+        />
       )}
       {editing && (
         <EditEntryDialog entry={editing} onClose={() => setEditing(null)} />
@@ -172,12 +346,14 @@ function FolderChip({
   label,
   color,
   count,
+  icon,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   color?: string;
   count: number;
+  icon?: React.ReactNode;
 }) {
   return (
     <button
@@ -188,11 +364,15 @@ function FolderChip({
         active ? "chip-active" : "chip-inactive",
       )}
     >
-      {color && (
-        <span
-          className="inline-block w-2 h-2 rounded-full"
-          style={{ background: color }}
-        />
+      {icon ? (
+        <span style={{ color }}>{icon}</span>
+      ) : (
+        color && (
+          <span
+            className="inline-block w-2 h-2 rounded-full"
+            style={{ background: color }}
+          />
+        )
       )}
       {label}
       <span className="text-[10px] opacity-60 tabular-nums">{count}</span>

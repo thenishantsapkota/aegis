@@ -1,4 +1,13 @@
-import { Account, Client, ID, Permission, Query, Role, TablesDB } from "appwrite";
+import {
+  Account,
+  Client,
+  ID,
+  Permission,
+  Query,
+  Role,
+  TablesDB,
+  Teams,
+} from "appwrite";
 
 // Public Appwrite config — bundled into the browser, that's expected.
 const ENDPOINT = import.meta.env.VITE_APPWRITE_ENDPOINT;
@@ -10,9 +19,18 @@ export const VAULTS_TABLE_ID =
   import.meta.env.VITE_APPWRITE_COLLECTION_VAULTS ??
   "vaults";
 
+// Team (shared vault) tables.
+export const PUBLIC_KEYS_TABLE_ID =
+  import.meta.env.VITE_APPWRITE_TABLE_PUBLIC_KEYS ?? "publicKeys";
+export const TEAM_VAULTS_TABLE_ID =
+  import.meta.env.VITE_APPWRITE_TABLE_TEAM_VAULTS ?? "teamVaults";
+export const TEAM_GRANTS_TABLE_ID =
+  import.meta.env.VITE_APPWRITE_TABLE_TEAM_GRANTS ?? "teamKeyGrants";
+
 let _client: Client | null = null;
 let _account: Account | null = null;
 let _tablesDB: TablesDB | null = null;
+let _teams: Teams | null = null;
 
 function ensureConfigured() {
   if (!ENDPOINT || !PROJECT_ID) {
@@ -28,11 +46,13 @@ export function appwrite() {
     _client = new Client().setEndpoint(ENDPOINT!).setProject(PROJECT_ID!);
     _account = new Account(_client);
     _tablesDB = new TablesDB(_client);
+    _teams = new Teams(_client);
   }
   return {
     client: _client!,
     account: _account!,
     tablesDB: _tablesDB!,
+    teams: _teams!,
   };
 }
 

@@ -1,12 +1,48 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useLiveQuery } from "dexie-react-hooks";
 import { useEffect, useState } from "react";
 import { ArrowLeft, KeySquare, ScanLine, AlertTriangle } from "lucide-react";
 import { useVault } from "~/lib/vault-context";
-import { db, type EntrySecret, type Folder } from "~/lib/db";
+import { type EntrySecret } from "~/lib/db";
 import { normalizeBase32Secret, parseOtpauthUri } from "~/lib/totp";
 import { QrScanner } from "~/components/QrScanner";
+import {
+  DestinationSelect,
+  PERSONAL_UNFILED,
+  parseDest,
+  TeamFolderPicker,
+  useDestinations,
+} from "~/components/DestinationSelect";
 import { cn } from "~/lib/cn";
+
+type SaveInput = {
+  issuer: string;
+  account: string;
+  iconHint?: string | null;
+  secret: EntrySecret;
+};
+
+async function saveTo(
+  api: Pick<ReturnType<typeof useVault>, "saveEntry" | "saveTeamEntry">,
+  dest: string,
+  input: SaveInput,
+  teamFolderId: string,
+) {
+  const d = parseDest(dest);
+  if (d.kind === "team") {
+    await api.saveTeamEntry(d.teamId, { ...input, folderId: teamFolderId || null });
+    return;
+  }
+  await api.saveEntry(
+    {
+      folderId: d.folderId,
+      issuer: input.issuer,
+      account: input.account,
+      iconHint: input.iconHint ?? null,
+      secret: input.secret,
+    },
+    { immediateSync: true },
+  );
+}
 
 export const Route = createFileRoute("/add")({
   component: AddRoute,
@@ -84,8 +120,12 @@ function AddTabs() {
 
 function ScanPane() {
   const navigate = useNavigate();
-  const { saveEntry } = useVault();
+  const { saveEntry, saveTeamEntry } = useVault();
+  const { folders, writableTeams } = useDestinations();
+  const [dest, setDest] = useState(PERSONAL_UNFILED);
+  const [teamFolderId, setTeamFolderId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const target = parseDest(dest);
 
   async function onScan(text: string) {
     try {
@@ -95,21 +135,19 @@ function ScanPane() {
         return;
       }
       const parsed = parseOtpauthUri(text);
-      await saveEntry(
-        {
-          folderId: null,
-          issuer: parsed.issuer,
-          account: parsed.account,
-          secret: {
-            secret: parsed.secret,
-            algorithm: parsed.algorithm,
-            digits: parsed.digits,
-            period: parsed.period,
-            type: parsed.type,
-            counter: parsed.counter,
-          },
-        },
-        { immediateSync: true },
+      const secret: EntrySecret = {
+        secret: parsed.secret,
+        algorithm: parsed.algorithm,
+        digits: parsed.digits,
+        period: parsed.period,
+        type: parsed.type,
+        counter: parsed.counter,
+      };
+      await saveTo(
+        { saveEntry, saveTeamEntry },
+        dest,
+        { issuer: parsed.issuer, account: parsed.account, secret },
+        teamFolderId,
       );
       navigate({ to: "/" });
     } catch (e) {
@@ -123,6 +161,22 @@ function ScanPane() {
 
   return (
     <div className="space-y-3">
+      <DestinationSelect
+        folders={folders}
+        teams={writableTeams}
+        value={dest}
+        onChange={(v) => {
+          setDest(v);
+          setTeamFolderId("");
+        }}
+      />
+      {target.kind === "team" && (
+        <TeamFolderPicker
+          teamId={target.teamId}
+          value={teamFolderId}
+          onChange={setTeamFolderId}
+        />
+      )}
       <QrScanner onScan={onScan} />
       {error && (
         <div className="flex gap-2 text-sm text-danger">
@@ -148,17 +202,15 @@ function ScanPane() {
 
 function ManualPane() {
   const navigate = useNavigate();
-  const { saveEntry } = useVault();
-  const folders =
-    useLiveQuery<Folder[]>(
-      () => db().folders.orderBy("sortOrder").toArray(),
-      [],
-    ) ?? [];
+  const { saveEntry, saveTeamEntry } = useVault();
+  const { folders, writableTeams } = useDestinations();
 
   const [issuer, setIssuer] = useState("");
   const [account, setAccount] = useState("");
   const [secret, setSecret] = useState("");
-  const [folderId, setFolderId] = useState<string>("");
+  const [dest, setDest] = useState<string>(PERSONAL_UNFILED);
+  const [teamFolderId, setTeamFolderId] = useState("");
+  const target = parseDest(dest);
   const [algorithm, setAlgorithm] = useState<"SHA1" | "SHA256" | "SHA512">(
     "SHA1",
   );
@@ -191,14 +243,15 @@ function ManualPane() {
     };
     setBusy(true);
     try {
-      await saveEntry(
+      await saveTo(
+        { saveEntry, saveTeamEntry },
+        dest,
         {
-          folderId: folderId || null,
           issuer: issuer.trim(),
           account: account.trim(),
           secret: entrySecret,
         },
-        { immediateSync: true },
+        teamFolderId,
       );
       navigate({ to: "/" });
     } catch (e) {
@@ -249,21 +302,28 @@ function ManualPane() {
         />
       </div>
 
-      <div>
-        <label className="label">Folder</label>
-        <select
-          className="input"
-          value={folderId}
-          onChange={(e) => setFolderId(e.target.value)}
-        >
-          <option value="">Unfiled</option>
-          {folders.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <DestinationSelect
+        folders={folders}
+        teams={writableTeams}
+        value={dest}
+        onChange={(v) => {
+          setDest(v);
+          setTeamFolderId("");
+        }}
+      />
+      {target.kind === "team" && (
+        <>
+          <TeamFolderPicker
+            teamId={target.teamId}
+            value={teamFolderId}
+            onChange={setTeamFolderId}
+          />
+          <p className="text-xs text-muted -mt-2">
+            This code will be shared with everyone on the team and synced to the
+            cloud, encrypted with the team key.
+          </p>
+        </>
+      )}
 
       <details className="card p-3">
         <summary className="cursor-pointer text-sm text-muted">

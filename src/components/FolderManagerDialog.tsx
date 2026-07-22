@@ -1,7 +1,8 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { useState } from "react";
 import { Trash2, X } from "lucide-react";
-import { db, newId, type Folder } from "~/lib/db";
+import { db, newId, type Folder, type TeamFolder } from "~/lib/db";
+import { useVault } from "~/lib/vault-context";
 
 const FOLDER_COLORS = [
   "#63a7ff",
@@ -14,38 +15,82 @@ const FOLDER_COLORS = [
   "#94a3b8",
 ];
 
-export function FolderManagerDialog({ onClose }: { onClose: () => void }) {
+// Manages personal folders by default. Pass a `teamId` to manage that team's
+// shared folders instead (which live in the encrypted team vault).
+export function FolderManagerDialog({
+  onClose,
+  teamId,
+}: {
+  onClose: () => void;
+  teamId?: string;
+}) {
+  const { saveTeamFolder, deleteTeamFolder } = useVault();
+  const isTeam = !!teamId;
+
   const folders =
-    useLiveQuery<Folder[]>(
-      () => db().folders.orderBy("sortOrder").toArray(),
-      [],
+    useLiveQuery<Array<Folder | TeamFolder>>(
+      () =>
+        teamId
+          ? db().teamFolders.where("teamId").equals(teamId).sortBy("sortOrder")
+          : db().folders.orderBy("sortOrder").toArray(),
+      [teamId],
     ) ?? [];
+
   const [name, setName] = useState("");
   const [color, setColor] = useState(FOLDER_COLORS[0]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function addFolder(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    const now = Date.now();
-    await db().folders.put({
-      id: newId(),
-      name: name.trim(),
-      color,
-      sortOrder: now,
-      createdAt: now,
-    });
-    setName("");
+    setBusy(true);
+    setError(null);
+    try {
+      if (teamId) {
+        await saveTeamFolder(teamId, { name: name.trim(), color });
+      } else {
+        const now = Date.now();
+        await db().folders.put({
+          id: newId(),
+          name: name.trim(),
+          color,
+          sortOrder: now,
+          createdAt: now,
+        });
+      }
+      setName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't add folder");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function removeFolder(id: string) {
     if (!confirm("Delete this folder? Codes inside will become unfiled.")) return;
-    await db().transaction("rw", [db().folders, db().entries], async () => {
-      await db().folders.delete(id);
-      const inFolder = await db().entries.where("folderId").equals(id).toArray();
-      for (const e of inFolder) {
-        await db().entries.update(e.id, { folderId: null });
+    setBusy(true);
+    setError(null);
+    try {
+      if (teamId) {
+        await deleteTeamFolder(teamId, id);
+      } else {
+        await db().transaction("rw", [db().folders, db().entries], async () => {
+          await db().folders.delete(id);
+          const inFolder = await db()
+            .entries.where("folderId")
+            .equals(id)
+            .toArray();
+          for (const e of inFolder) {
+            await db().entries.update(e.id, { folderId: null });
+          }
+        });
       }
-    });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete folder");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -61,7 +106,9 @@ export function FolderManagerDialog({ onClose }: { onClose: () => void }) {
         }}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
-          <h2 className="text-lg font-semibold">Folders</h2>
+          <h2 className="text-lg font-semibold">
+            {isTeam ? "Team folders" : "Folders"}
+          </h2>
           <button
             onClick={onClose}
             className="w-9 h-9 rounded-xl bg-bg-elev border border-border flex items-center justify-center"
@@ -75,6 +122,11 @@ export function FolderManagerDialog({ onClose }: { onClose: () => void }) {
           className="overflow-y-auto overscroll-contain px-5 pb-5"
           style={{ paddingBottom: "max(1.25rem, var(--safe-bottom))" }}
         >
+          {isTeam && (
+            <p className="text-xs text-muted mb-4">
+              Team folders are shared with everyone on the team.
+            </p>
+          )}
           <form onSubmit={addFolder} className="space-y-3 mb-5">
             <div>
               <label className="label">New folder name</label>
@@ -104,8 +156,9 @@ export function FolderManagerDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
             </div>
-            <button type="submit" className="btn-primary w-full">
-              Add folder
+            {error && <div className="text-sm text-danger">{error}</div>}
+            <button type="submit" disabled={busy} className="btn-primary w-full">
+              {busy ? "…" : "Add folder"}
             </button>
           </form>
 
@@ -127,6 +180,7 @@ export function FolderManagerDialog({ onClose }: { onClose: () => void }) {
                   <span className="flex-1 truncate">{f.name}</span>
                   <button
                     onClick={() => removeFolder(f.id)}
+                    disabled={busy}
                     className="w-9 h-9 rounded-xl text-danger hover:bg-danger/10 flex items-center justify-center"
                     aria-label={`Delete ${f.name}`}
                   >

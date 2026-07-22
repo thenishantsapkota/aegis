@@ -462,11 +462,11 @@ export async function pushLocalVault(vaultKey: CryptoKey): Promise<VaultMeta> {
 
 export async function pullRemoteVault(
   vaultKey: CryptoKey,
-): Promise<{ meta: VaultMeta; applied: boolean }> {
+): Promise<{ meta: VaultMeta; applied: boolean; cloudHasIdentity: boolean }> {
   const meta = await getMeta();
   if (!meta || !meta.userId) throw new Error("Sign in to cloud first.");
   const row = await getOrNullVaultRow(meta.userId);
-  if (!row) return { meta, applied: false };
+  if (!row) return { meta, applied: false, cloudHasIdentity: false };
 
   const wrapped = JSON.parse(atob(row.cipherText)) as EncryptedBlob;
   let exportObj: unknown;
@@ -503,7 +503,7 @@ export async function pullRemoteVault(
     },
   );
   const fresh = (await getMeta())!;
-  return { meta: fresh, applied: true };
+  return { meta: fresh, applied: true, cloudHasIdentity: !!exportObj.identity };
 }
 
 // ---- helpers ----------------------------------------------------------------

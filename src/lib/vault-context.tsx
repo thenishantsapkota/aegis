@@ -345,6 +345,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
               } catch (e) {
                 console.warn("[teams] adopting cloud identity failed:", e);
               }
+            } else if (metaRef.current?.identity) {
+              // Cloud vault predates identity sync but we have a local identity.
+              // Upload it (we just pulled, so local == cloud + our identity) so
+              // the other devices on this account converge on the same keypair.
+              try {
+                const pushed = await pushLocalVault(vk);
+                metaRef.current = pushed;
+              } catch (e) {
+                console.warn("[teams] uploading identity to cloud failed:", e);
+              }
             }
           }
         } catch (e) {

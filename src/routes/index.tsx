@@ -10,7 +10,7 @@ export const Route = createFileRoute("/")({
 });
 
 function HomeRoute() {
-  const { state, pullNow, pushNow } = useVault();
+  const { state, pullNow, pushNow, refreshTeams } = useVault();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -33,7 +33,13 @@ function HomeRoute() {
     } catch (e) {
       console.warn("[swipe-sync] push failed:", e);
     }
-  }, [pullNow, pushNow]);
+    // Also sync shared team vaults (pulls team codes other devices pushed).
+    try {
+      await refreshTeams();
+    } catch (e) {
+      console.warn("[swipe-sync] team refresh failed:", e);
+    }
+  }, [pullNow, pushNow, refreshTeams]);
 
   if (state.status !== "unlocked") {
     return (

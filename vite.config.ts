@@ -18,12 +18,12 @@ export default defineConfig({
       injectRegister: "auto",
       includeAssets: ["favicon.svg", "icons/icon-maskable.svg"],
       manifest: {
-        name: "Aegis — 2FA Codes",
+        name: "Aegis 2FA Codes",
         short_name: "Aegis",
         description:
-          "Aegis: offline-first 2FA authenticator with encrypted on-device storage, folder organization, and optional encrypted cloud sync. Codes you carry.",
-        theme_color: "#0b0f17",
-        background_color: "#0b0f17",
+          "Aegis: offline-first 2FA authenticator with encrypted on-device storage, folder organization, and optional encrypted cloud sync.",
+        theme_color: "#0c0c0e",
+        background_color: "#0c0c0e",
         display: "standalone",
         display_override: ["standalone", "fullscreen"],
         orientation: "portrait",

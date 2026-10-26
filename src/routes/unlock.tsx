@@ -1,6 +1,7 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Lock, AlertTriangle, Fingerprint } from "lucide-react";
+import { Fingerprint } from "lucide-react";
+import { AuthLayout, FooterLink, FormError } from "~/components/AuthLayout";
 import { useVault } from "~/lib/vault-context";
 import { isBiometricAvailable } from "~/lib/biometric";
 
@@ -21,19 +22,18 @@ function UnlockRoute() {
     void isBiometricAvailable().then(setBioOk);
   }, []);
 
+  // Redirect from an effect, not during render.
+  useEffect(() => {
+    if (state.status === "uninitialized") navigate({ to: "/setup" });
+    else if (state.status === "unlocked") navigate({ to: "/" });
+  }, [state.status, navigate]);
+
   if (state.status === "loading") {
     return (
-      <div className="h-safe-screen flex items-center justify-center text-muted">
-        Loading…
-      </div>
+      <div className="h-safe-screen" aria-busy="true" />
     );
   }
-  if (state.status === "uninitialized") {
-    navigate({ to: "/setup" });
-    return null;
-  }
-  if (state.status === "unlocked") {
-    navigate({ to: "/" });
+  if (state.status === "uninitialized" || state.status === "unlocked") {
     return null;
   }
 
@@ -67,69 +67,50 @@ function UnlockRoute() {
   }
 
   return (
-    <div className="h-safe-screen flex items-center justify-center px-4 pt-safe pb-safe">
-      <div className="w-full max-w-md card p-6 animate-fade-in">
-        <div className="flex items-center gap-3 mb-5">
-          <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-accent/15 text-accent">
-            <Lock size={22} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold">Unlock your vault</h1>
-            {state.email ? (
-              <p className="text-sm text-muted truncate">{state.email}</p>
-            ) : (
-              <p className="text-sm text-muted">Enter your master password</p>
-            )}
-          </div>
+    <AuthLayout
+      title="Unlock Aegis"
+      subtitle={state.email ?? "Enter your master password."}
+      footer={
+        <FooterLink
+          text="On a new device?"
+          link="Restore from your cloud account"
+          to="/restore"
+        />
+      }
+    >
+      <form onSubmit={onSubmit} className="space-y-5">
+        <div>
+          <label className="label" htmlFor="pw">Master password</label>
+          <input
+            id="pw"
+            type="password"
+            autoComplete="current-password"
+            autoFocus={!canUseBiometric}
+            className="input"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </div>
-
+        {error && <FormError>{error}</FormError>}
+        <button
+          type="submit"
+          disabled={busy || !password}
+          className="btn-primary w-full"
+        >
+          {busy ? "Unlocking…" : "Unlock"}
+        </button>
         {canUseBiometric && (
           <button
             type="button"
             disabled={bioBusy}
             onClick={onBiometric}
-            className="btn-ghost w-full mb-4"
+            className="btn-ghost w-full"
           >
             <Fingerprint size={18} />
-            {bioBusy ? "Waiting for biometric…" : "Unlock with biometric"}
+            {bioBusy ? "Waiting for biometric…" : "Use biometric"}
           </button>
         )}
-
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="label">Master password</label>
-            <input
-              type="password"
-              autoComplete="current-password"
-              autoFocus
-              className="input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          {error && (
-            <div className="flex items-start gap-2 text-sm text-danger">
-              <AlertTriangle size={16} className="mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={busy || !password}
-            className="btn-primary w-full"
-          >
-            {busy ? "Unlocking…" : "Unlock"}
-          </button>
-          <div className="text-center text-sm text-muted">
-            <Link
-              to="/restore"
-              className="hover:text-white underline-offset-4 hover:underline"
-            >
-              Restore from cloud account
-            </Link>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </AuthLayout>
   );
 }

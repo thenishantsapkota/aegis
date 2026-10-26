@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useVault } from "~/lib/vault-context";
+import { FluidTabs } from "~/components/ui/fluid-tabs";
 import { db, type Folder } from "~/lib/db";
 import {
   isGoogleMigrationUri,
@@ -44,17 +45,12 @@ function ImportRoute() {
 
   return (
     <div className="min-h-safe-screen pt-safe pb-safe pl-safe pr-safe">
-      <div className="mx-auto max-w-2xl px-4 pt-6 pb-32 animate-fade-in">
-        <header className="flex items-center justify-between mb-6">
-          <Link
-            to="/settings"
-            className="w-10 h-10 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white"
-            aria-label="Back"
-          >
-            <ArrowLeft size={18} />
+      <div className="mx-auto max-w-2xl px-4 pt-4 pb-32">
+        <header className="flex items-center gap-1 -ml-2 mb-6">
+          <Link to="/settings" className="icon-btn" aria-label="Back">
+            <ArrowLeft size={20} />
           </Link>
           <h1 className="text-lg font-semibold">Import from another app</h1>
-          <div className="w-10" />
         </header>
 
         <Instructions />
@@ -73,7 +69,7 @@ function Instructions() {
       steps: [
         "Open Google Authenticator on your old device.",
         "Tap the menu (top-right) → Transfer accounts → Export accounts.",
-        "Pick the accounts to move, tap Next — it shows a QR code (or several if there are many accounts).",
+        "Pick the accounts to move, tap Next. It shows a QR code (or several if there are many accounts).",
         "Back here, choose Scan migration QR below and point your camera at it. Repeat for each QR.",
       ],
     },
@@ -115,7 +111,7 @@ function Instructions() {
 
   return (
     <section className="mb-6 space-y-2">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-muted font-semibold">
+      <div className="flex items-center gap-2 text-sm text-muted font-medium">
         <Info size={14} /> How to export from your current app
       </div>
       <div className="card divide-y divide-white/[0.06]">
@@ -157,32 +153,20 @@ function ImportTabs() {
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-white/[0.04] border border-white/[0.08] mb-4">
-        <button
-          type="button"
-          onClick={() => setTab("scan")}
-          className={cn(
-            "py-2.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2 transition",
-            tab === "scan"
-              ? "bg-gradient-primary text-white shadow-soft"
-              : "text-muted hover:text-white",
-          )}
-        >
-          <ScanLine size={16} /> Scan migration QR
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("paste")}
-          className={cn(
-            "py-2.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2 transition",
-            tab === "paste"
-              ? "bg-gradient-primary text-white shadow-soft"
-              : "text-muted hover:text-white",
-          )}
-        >
-          <ClipboardPaste size={16} /> Paste URIs
-        </button>
-      </div>
+      <FluidTabs
+        className="mb-4"
+        activeIndex={tab === "scan" ? 0 : 1}
+        onActiveIndexChange={(i) => setTab(i === 0 ? "scan" : "paste")}
+      >
+        <FluidTabs.List aria-label="Import method">
+          <FluidTabs.Tab>
+            <ScanLine size={16} /> Scan migration QR
+          </FluidTabs.Tab>
+          <FluidTabs.Tab>
+            <ClipboardPaste size={16} /> Paste URIs
+          </FluidTabs.Tab>
+        </FluidTabs.List>
+      </FluidTabs>
 
       {tab === "scan" ? <ScanMigration /> : <PasteUris />}
     </div>
@@ -229,8 +213,8 @@ function ScanMigration() {
             </div>
           )}
           <p className="text-xs text-muted text-center leading-relaxed">
-            Google Authenticator may show several QR codes — scan each one;
-            Aegis will collect them. The migration QR is dense — hold your
+            Google Authenticator may show several QR codes. Scan each one and
+            Aegis will collect them. The migration QR is dense, so hold your
             phone <strong>steady</strong> and <strong>fill most of the
             frame</strong> for a few seconds.
           </p>
@@ -407,8 +391,8 @@ function PreviewAndSave({
               <Check size={14} className="text-success shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="text-sm truncate">
-                  <span className="font-medium">{e.issuer || "—"}</span>
-                  <span className="text-muted"> · {e.account || "—"}</span>
+                  <span className="font-medium">{e.issuer || "No issuer"}</span>
+                  <span className="text-muted"> · {e.account || "No account"}</span>
                 </div>
                 <div className="text-[11px] text-muted">
                   {e.type} · {e.algorithm} · {e.digits} digits

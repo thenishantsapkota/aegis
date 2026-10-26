@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, KeySquare, ScanLine, AlertTriangle } from "lucide-react";
+import { KeySquare, ScanLine, AlertTriangle } from "lucide-react";
 import { useVault } from "~/lib/vault-context";
+import { FluidTabs } from "~/components/ui/fluid-tabs";
+import { AppShell } from "~/components/AppShell";
 import { type EntrySecret } from "~/lib/db";
 import { normalizeBase32Secret, parseOtpauthUri } from "~/lib/totp";
 import { QrScanner } from "~/components/QrScanner";
@@ -66,22 +68,13 @@ function AddRoute() {
   }
 
   return (
-    <div className="min-h-safe-screen pt-safe pb-safe pl-safe pr-safe">
-      <div className="mx-auto max-w-2xl px-4 pt-4">
-        <header className="flex items-center justify-between mb-4">
-          <Link
-            to="/"
-            className="w-10 h-10 rounded-xl bg-bg-elev border border-border flex items-center justify-center text-muted hover:text-white"
-            aria-label="Back"
-          >
-            <ArrowLeft size={18} />
-          </Link>
-          <h1 className="text-lg font-semibold">Add code</h1>
-          <div className="w-10" />
-        </header>
+    // Inside the shell so the tab bar stays put; Add is a tab, so no back arrow.
+    <AppShell>
+      <div className="pt-5">
+        <h1 className="text-2xl font-semibold tracking-tight mb-6">Add code</h1>
         <AddTabs />
       </div>
-    </div>
+    </AppShell>
   );
 }
 
@@ -90,28 +83,20 @@ function AddTabs() {
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-bg-elev border border-border mb-4">
-        <button
-          type="button"
-          onClick={() => setTab("scan")}
-          className={cn(
-            "py-2.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2 transition",
-            tab === "scan" ? "bg-bg-card text-white" : "text-muted",
-          )}
-        >
-          <ScanLine size={16} /> Scan QR
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("manual")}
-          className={cn(
-            "py-2.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2 transition",
-            tab === "manual" ? "bg-bg-card text-white" : "text-muted",
-          )}
-        >
-          <KeySquare size={16} /> Manual entry
-        </button>
-      </div>
+      <FluidTabs
+        className="mb-5"
+        activeIndex={tab === "scan" ? 0 : 1}
+        onActiveIndexChange={(i) => setTab(i === 0 ? "scan" : "manual")}
+      >
+        <FluidTabs.List aria-label="Add method">
+          <FluidTabs.Tab>
+            <ScanLine size={16} /> Scan QR
+          </FluidTabs.Tab>
+          <FluidTabs.Tab>
+            <KeySquare size={16} /> Manual entry
+          </FluidTabs.Tab>
+        </FluidTabs.List>
+      </FluidTabs>
 
       {tab === "scan" ? <ScanPane /> : <ManualPane />}
     </div>
@@ -226,7 +211,7 @@ function ManualPane() {
     setError(null);
     const normalized = normalizeBase32Secret(secret);
     if (!normalized) {
-      setError("Secret must be a valid base32 string (letters A–Z, digits 2–7).");
+      setError("Secret must be a valid base32 string (letters A-Z, digits 2-7).");
       return;
     }
     if (!issuer.trim() && !account.trim()) {

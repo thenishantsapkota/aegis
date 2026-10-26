@@ -43,9 +43,9 @@ function HomeRoute() {
 
   if (state.status !== "unlocked") {
     return (
-      <div className="h-safe-screen flex items-center justify-center text-muted">
-        <div className="animate-pulse">Loading vault…</div>
-      </div>
+      // Blank while the vault loads: it usually takes a few ms, and any text
+      // here just flickers.
+      <div className="h-safe-screen" aria-busy="true" />
     );
   }
 

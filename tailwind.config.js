@@ -6,7 +6,7 @@ export default {
     extend: {
       fontFamily: {
         sans: [
-          "Inter",
+          "Geist Variable",
           "system-ui",
           "-apple-system",
           "BlinkMacSystemFont",
@@ -17,6 +17,7 @@ export default {
           "sans-serif",
         ],
         mono: [
+          "Geist Mono Variable",
           "ui-monospace",
           "SF Mono",
           "Menlo",
@@ -27,55 +28,34 @@ export default {
         ],
       },
       colors: {
+        // Neutral zinc base; the only hue is the brand blue from the favicon.
         bg: {
-          DEFAULT: "rgb(7 9 19)",
-          elev: "rgb(15 19 32)",
-          card: "rgb(20 25 41)",
+          DEFAULT: "rgb(12 12 14)",
+          elev: "rgb(22 22 25)",
+          card: "rgb(27 27 31)",
         },
         border: {
           DEFAULT: "rgb(255 255 255 / 0.08)",
           strong: "rgb(255 255 255 / 0.14)",
         },
         accent: {
-          DEFAULT: "rgb(124 134 255)", // indigo-violet
-          hover: "rgb(148 156 255)",
-          glow: "rgb(124 134 255 / 0.35)",
-        },
-        cyan: {
-          accent: "rgb(34 211 238)",
+          DEFAULT: "rgb(99 167 255)",
+          hover: "rgb(130 186 255)",
         },
         danger: "rgb(248 113 113)",
         success: "rgb(74 222 128)",
         warn: "rgb(251 191 36)",
-        muted: "rgb(148 163 184)",
-      },
-      backgroundImage: {
-        "gradient-primary":
-          "linear-gradient(135deg, rgb(124 134 255) 0%, rgb(56 189 248) 100%)",
-        "gradient-primary-soft":
-          "linear-gradient(135deg, rgb(124 134 255 / 0.16) 0%, rgb(56 189 248 / 0.16) 100%)",
-        "gradient-card":
-          "linear-gradient(180deg, rgb(255 255 255 / 0.04) 0%, rgb(255 255 255 / 0.01) 100%)",
-        mesh: `
-          radial-gradient(at 8% 0%, rgb(124 134 255 / 0.18) 0px, transparent 50%),
-          radial-gradient(at 92% 12%, rgb(56 189 248 / 0.14) 0px, transparent 50%),
-          radial-gradient(at 50% 100%, rgb(168 85 247 / 0.10) 0px, transparent 55%),
-          linear-gradient(180deg, rgb(7 9 19) 0%, rgb(4 6 14) 100%)
-        `,
+        muted: "rgb(161 161 170)",
       },
       boxShadow: {
-        glow: "0 0 0 1px rgb(124 134 255 / 0.25), 0 8px 32px -8px rgb(124 134 255 / 0.45)",
-        card: "0 1px 0 rgb(255 255 255 / 0.04) inset, 0 8px 24px -12px rgb(0 0 0 / 0.6)",
-        soft: "0 1px 2px rgb(0 0 0 / 0.2), 0 12px 32px -16px rgb(0 0 0 / 0.5)",
-        ring: "0 0 0 4px rgb(124 134 255 / 0.18)",
+        soft: "0 1px 2px rgb(0 0 0 / 0.3)",
       },
       borderRadius: {
-        "2.5xl": "1.25rem",
+        "2.5xl": "1rem",
       },
       animation: {
         "fade-in": "fadeIn 240ms cubic-bezier(0.22, 1, 0.36, 1)",
         "scale-in": "scaleIn 200ms cubic-bezier(0.22, 1, 0.36, 1)",
-        shimmer: "shimmer 2.5s linear infinite",
       },
       keyframes: {
         fadeIn: {
@@ -85,10 +65,6 @@ export default {
         scaleIn: {
           "0%": { opacity: "0", transform: "scale(0.96)" },
           "100%": { opacity: "1", transform: "scale(1)" },
-        },
-        shimmer: {
-          "0%": { backgroundPosition: "200% 0" },
-          "100%": { backgroundPosition: "-200% 0" },
         },
       },
     },

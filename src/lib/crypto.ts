@@ -106,6 +106,16 @@ export async function importRawVaultKey(raw: Uint8Array): Promise<CryptoKey> {
   );
 }
 
+// A non-extractable copy of the vault key, safe to persist in IndexedDB for
+// the unlock session: usable for encrypt/decrypt, but never exportable.
+export async function toSessionKey(key: CryptoKey): Promise<CryptoKey> {
+  const raw = await crypto.subtle.exportKey("raw", key);
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
 // Export an AES-GCM key as raw bytes (for biometric wrapping).
 export async function exportRawVaultKey(key: CryptoKey): Promise<Uint8Array> {
   const buf = await crypto.subtle.exportKey("raw", key);

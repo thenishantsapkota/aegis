@@ -111,6 +111,15 @@ export type EntrySecret = {
   counter?: number; // HOTP only
 };
 
+// The unlocked vault key, kept across reloads until the auto-lock deadline.
+// `key` is a non-extractable CryptoKey: IndexedDB stores it as an opaque
+// handle, so it can be used to decrypt but its bytes can never be read back.
+export type UnlockSession = {
+  id: "session";
+  key: CryptoKey;
+  expiresAt: number;
+};
+
 export class VaultDB extends Dexie {
   meta!: Table<VaultMeta, "vault">;
   folders!: Table<Folder, string>;
@@ -119,6 +128,7 @@ export class VaultDB extends Dexie {
   teamEntries!: Table<TeamEntryRecord, string>;
   teamFolders!: Table<TeamFolder, string>;
   teamKeyCache!: Table<TeamKeyCacheEntry, string>;
+  session!: Table<UnlockSession, "session">;
 
   constructor() {
     super("vault-authenticator");
@@ -140,6 +150,10 @@ export class VaultDB extends Dexie {
     // v4: per-user team key cache (synced via the personal vault).
     this.version(4).stores({
       teamKeyCache: "teamId",
+    });
+    // v5: unlock session that survives page reloads.
+    this.version(5).stores({
+      session: "id",
     });
   }
 }

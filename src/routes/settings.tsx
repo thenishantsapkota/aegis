@@ -1,18 +1,20 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
-  ArrowLeft,
-  ClipboardPaste,
+  ArrowRightLeft,
+  ChevronRight,
   Cloud,
+  CloudDownload,
   CloudOff,
+  CloudUpload,
   Download,
   Fingerprint,
   Lock,
   LogOut,
-  RefreshCcw,
-  ShieldAlert,
+  Trash2,
   Upload,
+  type LucideIcon,
 } from "lucide-react";
 import { isBiometricAvailable } from "~/lib/biometric";
 import { useVault } from "~/lib/vault-context";
@@ -25,6 +27,9 @@ import {
   type EncryptedExport,
 } from "~/lib/export";
 import { AppShell } from "~/components/AppShell";
+import { ToggleSwitch } from "~/components/ui/toggle-switch";
+import { FluidTabs } from "~/components/ui/fluid-tabs";
+import { cn } from "~/lib/cn";
 import {
   cloudSignInExisting,
   cloudSignOut,
@@ -48,40 +53,24 @@ function SettingsRoute() {
 
   if (state.status !== "unlocked") {
     return (
-      <div className="h-safe-screen flex items-center justify-center text-muted">
-        Loading…
-      </div>
+      <div className="h-safe-screen" aria-busy="true" />
     );
   }
 
   return (
     <AppShell>
-      <div className="pt-4">
-        <header className="flex items-center justify-between mb-5">
-          <Link
-            to="/"
-            className="w-10 h-10 rounded-xl bg-bg-elev border border-border flex items-center justify-center text-muted hover:text-white"
-            aria-label="Back"
-          >
-            <ArrowLeft size={18} />
-          </Link>
-          <h1 className="text-lg font-semibold">Settings</h1>
-          <div className="w-10" />
-        </header>
+      <div className="pt-5">
+        <h1 className="text-2xl font-semibold tracking-tight mb-6">Settings</h1>
 
-        <section className="space-y-3 mb-6">
-          <h2 className="text-xs uppercase tracking-wider text-muted">Vault</h2>
-          <button onClick={lock} className="card p-4 w-full text-left flex items-center gap-3">
-            <Lock size={18} className="text-muted" />
-            <div className="flex-1">
-              <div className="font-medium">Lock now</div>
-              <div className="text-xs text-muted">
-                Requires master password (or biometric) to unlock.
-              </div>
-            </div>
-          </button>
-          <BiometricSection />
-        </section>
+        <Group title="Security">
+          <Row
+            icon={Lock}
+            label="Lock now"
+            detail="Stays unlocked for an hour after you unlock, even across reloads."
+            onClick={lock}
+          />
+          <BiometricRow />
+        </Group>
 
         <CloudSyncSection />
         <ExportImportSection />
@@ -91,7 +80,7 @@ function SettingsRoute() {
   );
 }
 
-function BiometricSection() {
+function BiometricRow() {
   const { state, enableBiometric, disableBiometric } = useVault();
   const [available, setAvailable] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -107,50 +96,42 @@ function BiometricSection() {
       : false;
 
   if (available === null) return null;
-  if (!available) {
-    return (
-      <div className="card p-4 text-sm text-muted border-warn/30 bg-warn/5">
-        Your device doesn't expose a biometric authenticator over the web.
-        On Android, make sure Chrome 132+ is up to date and a screen-lock is
-        set; on iOS, use Safari 18+; on desktop, enable Windows Hello / Touch ID.
-      </div>
-    );
-  }
 
   return (
-    <div className="card p-4">
-      <div className="flex items-center gap-3">
-        <Fingerprint size={20} className="text-accent" />
-        <div className="flex-1">
-          <div className="font-medium">Biometric unlock</div>
-          <div className="text-xs text-muted">
-            {enrolled
-              ? "Enabled on this device. Use Face ID, Touch ID, Windows Hello, or your fingerprint."
-              : "Skip the master password on this device after the first unlock."}
-          </div>
-        </div>
-        <button
-          type="button"
-          disabled={busy || state.status !== "unlocked"}
-          onClick={async () => {
+    <Row
+      icon={Fingerprint}
+      label="Biometric unlock"
+      detail={
+        error ? (
+          <span className="text-danger">{error}</span>
+        ) : !available ? (
+          "Not available in this browser. Needs Face ID, Touch ID, Windows Hello or a fingerprint sensor with a screen lock."
+        ) : enrolled ? (
+          "On for this device."
+        ) : (
+          "Unlock with Face ID, Touch ID or your fingerprint."
+        )
+      }
+      trailing={
+        <ToggleSwitch
+          label="Biometric unlock"
+          checked={enrolled}
+          disabled={!available || busy || state.status !== "unlocked"}
+          onChange={async (next) => {
             setError(null);
             setBusy(true);
             try {
-              if (enrolled) await disableBiometric();
-              else await enableBiometric();
+              if (next) await enableBiometric();
+              else await disableBiometric();
             } catch (e) {
               setError(e instanceof Error ? e.message : "Failed");
             } finally {
               setBusy(false);
             }
           }}
-          className={enrolled ? "btn-danger" : "btn-primary"}
-        >
-          {busy ? "…" : enrolled ? "Disable" : "Enable"}
-        </button>
-      </div>
-      {error && <div className="text-sm text-danger mt-3">{error}</div>}
-    </div>
+        />
+      }
+    />
   );
 }
 
@@ -169,122 +150,86 @@ function CloudSyncSection() {
 
   const signedIn = !!meta?.sessionToken;
 
-  return (
-    <section className="space-y-3 mb-6">
-      <h2 className="text-xs uppercase tracking-wider text-muted">
-        Cloud sync (Appwrite, zero-knowledge)
-      </h2>
+  async function run(kind: string, action: () => Promise<void>, fallback: string) {
+    setError(null);
+    setBusy(kind);
+    try {
+      await action();
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : fallback);
+    } finally {
+      setBusy(null);
+    }
+  }
 
-      {!isAppwriteConfigured() && (
-        <div className="card p-4 text-sm text-muted border-warn/30 bg-warn/5">
-          Appwrite isn't configured. Cloud sync is disabled until you set
-          <code className="mx-1 text-warn">VITE_APPWRITE_ENDPOINT</code>
-          and
-          <code className="ml-1 text-warn">VITE_APPWRITE_PROJECT_ID</code>
-          in <code className="text-warn">.env</code> (see
-          <code className="ml-1 text-warn">.env.example</code>). You can still
-          use the encrypted file export/import below.
-        </div>
-      )}
-
-      {isAppwriteConfigured() && signedIn ? (
-        <div className="card p-4 space-y-3">
-          <div className="flex items-center gap-3">
-            <Cloud size={18} className="text-success" />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium truncate">{meta?.email}</div>
-              <div className="text-xs text-muted">
-                {meta?.lastSyncedAt
-                  ? `Last synced ${new Date(meta.lastSyncedAt).toLocaleString()} · v${meta.remoteVersion ?? "?"}`
-                  : "Not synced yet"}
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <SyncButton
-              label={busy === "push" ? "Pushing…" : "Push to cloud"}
-              icon={<Upload size={16} />}
-              disabled={!!busy}
-              onClick={async () => {
-                setError(null);
-                setBusy("push");
-                try {
-                  await pushNow();
-                  await refresh();
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "Push failed");
-                } finally {
-                  setBusy(null);
-                }
-              }}
-            />
-            <SyncButton
-              label={busy === "pull" ? "Pulling…" : "Pull from cloud"}
-              icon={<Download size={16} />}
-              disabled={!!busy}
-              onClick={async () => {
-                setError(null);
-                setBusy("pull");
-                try {
-                  const applied = await pullNow();
-                  if (!applied) setError("Nothing on the server yet.");
-                  await refresh();
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "Pull failed");
-                } finally {
-                  setBusy(null);
-                }
-              }}
-            />
-          </div>
-          <button
-            onClick={async () => {
-              setError(null);
-              setBusy("out");
-              try {
-                await cloudSignOut();
-                await refresh();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : "Sign-out failed");
-              } finally {
-                setBusy(null);
-              }
-            }}
-            className="btn-ghost w-full"
-          >
-            <LogOut size={16} /> Sign out of cloud
-          </button>
-        </div>
-      ) : isAppwriteConfigured() ? (
-        <CloudAuthForm onDone={refresh} />
-      ) : null}
-
-      {error && (
-        <div className="text-sm text-danger px-1">{error}</div>
-      )}
-      <p className="text-xs text-muted px-1">
-        The server only stores ciphertext. Your master password (and the key
-        derived from it) never leaves this device.
-      </p>
-    </section>
+  const footer = (
+    <>
+      {error && <span className="block text-danger mb-1">{error}</span>}
+      The server only stores encrypted data. Your master password never leaves
+      this device.
+    </>
   );
-}
 
-function SyncButton({
-  label,
-  icon,
-  onClick,
-  disabled,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
+  if (!isAppwriteConfigured()) {
+    return (
+      <Group title="Cloud sync" footer="Encrypted file export below still works.">
+        <Row
+          icon={CloudOff}
+          label="Not configured"
+          detail="Set VITE_APPWRITE_ENDPOINT and VITE_APPWRITE_PROJECT_ID in .env (see .env.example)."
+        />
+      </Group>
+    );
+  }
+
+  if (!signedIn) {
+    return (
+      <Group title="Cloud sync" footer={footer}>
+        <CloudAuthForm onDone={refresh} />
+      </Group>
+    );
+  }
+
   return (
-    <button onClick={onClick} disabled={disabled} className="btn-ghost">
-      {icon} {label}
-    </button>
+    <Group title="Cloud sync" footer={footer}>
+      <Row
+        icon={Cloud}
+        label={meta?.email ?? "Signed in"}
+        detail={
+          meta?.lastSyncedAt
+            ? `Last synced ${new Date(meta.lastSyncedAt).toLocaleString()}`
+            : "Not synced yet"
+        }
+      />
+      <Row
+        icon={CloudUpload}
+        label={busy === "push" ? "Pushing…" : "Push to cloud"}
+        onClick={busy ? undefined : () => run("push", pushNow, "Push failed")}
+      />
+      <Row
+        icon={CloudDownload}
+        label={busy === "pull" ? "Pulling…" : "Pull from cloud"}
+        onClick={
+          busy
+            ? undefined
+            : () =>
+                run(
+                  "pull",
+                  async () => {
+                    if (!(await pullNow())) throw new Error("Nothing on the server yet.");
+                  },
+                  "Pull failed",
+                )
+        }
+      />
+      <Row
+        icon={LogOut}
+        label={busy === "out" ? "Signing out…" : "Sign out of cloud"}
+        tone="danger"
+        onClick={busy ? undefined : () => run("out", cloudSignOut, "Sign-out failed")}
+      />
+    </Group>
   );
 }
 
@@ -319,51 +264,44 @@ function CloudAuthForm({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <form onSubmit={submit} className="card p-4 space-y-3">
-      <div className="flex items-center gap-3">
-        <CloudOff size={18} className="text-muted" />
-        <div className="flex-1">
-          <div className="font-medium">Enable cloud sync (optional)</div>
-          <div className="text-xs text-muted">
-            Use the same master password to encrypt before upload.
-          </div>
-        </div>
+    <form onSubmit={submit} className="p-4 space-y-4">
+      <p className="text-sm text-zinc-400">
+        Optional. Uses this vault's master password to encrypt before upload.
+      </p>
+      <FluidTabs
+        activeIndex={mode === "signup" ? 0 : 1}
+        onActiveIndexChange={(i) => setMode(i === 0 ? "signup" : "signin")}
+      >
+        <FluidTabs.List aria-label="Cloud account">
+          <FluidTabs.Tab>Create account</FluidTabs.Tab>
+          <FluidTabs.Tab>Sign in</FluidTabs.Tab>
+        </FluidTabs.List>
+      </FluidTabs>
+      <div>
+        <label className="label" htmlFor="cloud-email">Email</label>
+        <input
+          id="cloud-email"
+          className="input"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          required
+        />
       </div>
-      <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-bg-elev border border-border text-sm">
-        <button
-          type="button"
-          className={`py-1.5 rounded-lg ${mode === "signup" ? "bg-bg-card" : "text-muted"}`}
-          onClick={() => setMode("signup")}
-        >
-          Create account
-        </button>
-        <button
-          type="button"
-          className={`py-1.5 rounded-lg ${mode === "signin" ? "bg-bg-card" : "text-muted"}`}
-          onClick={() => setMode("signin")}
-        >
-          Sign in
-        </button>
+      <div>
+        <label className="label" htmlFor="cloud-pw">Master password</label>
+        <input
+          id="cloud-pw"
+          className="input"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          required
+        />
       </div>
-      <input
-        className="input"
-        type="email"
-        placeholder="you@example.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        autoComplete="email"
-        required
-      />
-      <input
-        className="input"
-        type="password"
-        placeholder="Master password (same as this vault)"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        autoComplete="current-password"
-        required
-      />
-      {error && <div className="text-sm text-danger">{error}</div>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button type="submit" disabled={busy} className="btn-primary w-full">
         {busy ? "…" : mode === "signup" ? "Create cloud account" : "Sign in"}
       </button>
@@ -480,63 +418,45 @@ function ExportImportSection() {
   }
 
   return (
-    <section className="space-y-3 mb-6">
-      <h2 className="text-xs uppercase tracking-wider text-muted">
-        Export &amp; import
-      </h2>
-      <div className="card p-4 space-y-3">
-        <button
-          onClick={onExport}
-          disabled={busy}
-          className="btn-ghost w-full"
-        >
-          <Download size={16} /> Export encrypted file (.json)
-        </button>
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={busy}
-          className="btn-ghost w-full"
-        >
-          <Upload size={16} /> Import from file
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void onImport(f);
-          }}
-        />
-        <Link
-          to="/import"
-          className="btn-ghost w-full no-underline"
-        >
-          <ClipboardPaste size={16} /> Import from another authenticator
-        </Link>
-        <p className="text-xs text-muted">
-          The file is encrypted with your master password. Send it to your
-          other device via AirDrop, email, or USB — opening it requires the
-          same password. To pull codes from Google Authenticator, Authy, 2FAS
-          and others, use{" "}
-          <Link
-            to="/import"
-            className="text-accent hover:text-accent-hover underline-offset-4 hover:underline"
-          >
-            Import from another authenticator
-          </Link>
-          .
-        </p>
-        {msg && (
-          <div
-            className={`text-sm ${msg.type === "ok" ? "text-success" : "text-danger"}`}
-          >
+    <Group
+      title="Backup and import"
+      footer={
+        msg ? (
+          <span className={msg.type === "ok" ? "text-success" : "text-danger"}>
             {msg.text}
-          </div>
-        )}
-      </div>
-    </section>
+          </span>
+        ) : (
+          "Export files are encrypted with your master password and need it to open."
+        )
+      }
+    >
+      <Row
+        icon={Download}
+        label="Export encrypted file"
+        onClick={busy ? undefined : onExport}
+      />
+      <Row
+        icon={Upload}
+        label="Import from file"
+        onClick={busy ? undefined : () => fileRef.current?.click()}
+      />
+      <Row
+        icon={ArrowRightLeft}
+        label="Import from another authenticator"
+        detail="Google Authenticator, Authy, 2FAS and others"
+        to="/import"
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void onImport(f);
+        }}
+      />
+    </Group>
   );
 }
 
@@ -546,48 +466,130 @@ function DangerZone() {
   const [confirming, setConfirming] = useState(false);
 
   return (
-    <section className="space-y-3 mb-10">
-      <h2 className="text-xs uppercase tracking-wider text-muted">
-        Danger zone
-      </h2>
-      <div className="card p-4 border-danger/30">
-        <div className="flex items-start gap-3">
-          <ShieldAlert size={18} className="text-danger mt-0.5" />
-          <div className="flex-1">
-            <div className="font-medium">Erase local vault</div>
-            <p className="text-xs text-muted mb-3">
-              Deletes all codes, folders, and the vault key on this device. If
-              you haven't pushed to cloud or exported, this is irreversible.
-            </p>
-            {confirming ? (
-              <div className="flex gap-2">
-                <button
-                  className="btn-danger flex-1"
-                  onClick={async () => {
-                    await resetLocalVault();
-                    navigate({ to: "/setup" });
-                  }}
-                >
-                  <RefreshCcw size={16} /> Yes, erase
-                </button>
-                <button
-                  className="btn-ghost flex-1"
-                  onClick={() => setConfirming(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                className="btn-danger"
-                onClick={() => setConfirming(true)}
-              >
-                Erase local vault
-              </button>
-            )}
-          </div>
+    <Group
+      footer="Deletes every code, folder and the vault key on this device. Without a cloud copy or export, it can't be undone."
+    >
+      {confirming ? (
+        <div className="flex items-center gap-2 px-4 py-3">
+          <span className="flex-1 text-[15px]">Erase everything?</span>
+          <button className="btn-ghost !py-2" onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+          <button
+            className="btn-danger !py-2"
+            onClick={async () => {
+              await resetLocalVault();
+              navigate({ to: "/setup" });
+            }}
+          >
+            Erase
+          </button>
         </div>
+      ) : (
+        <Row
+          icon={Trash2}
+          label="Erase local vault"
+          tone="danger"
+          onClick={() => setConfirming(true)}
+        />
+      )}
+    </Group>
+  );
+}
+
+// A settings section: an optional heading over one rounded container of
+// hairline-separated rows, with an optional note underneath.
+function Group({
+  title,
+  footer,
+  children,
+}: {
+  title?: string;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mb-8">
+      {title && (
+        <h2 className="px-1 mb-2 text-sm font-medium text-zinc-400">{title}</h2>
+      )}
+      <div className="rounded-2xl bg-bg-elev divide-y divide-white/[0.06] overflow-hidden">
+        {children}
       </div>
+      {footer && (
+        <p className="px-1 mt-2 text-xs leading-relaxed text-zinc-500">{footer}</p>
+      )}
     </section>
   );
+}
+
+// One settings row. Pass `onClick` for an action, `to` for a link (gets a
+// chevron), or neither for a static row; `trailing` sits on the right.
+function Row({
+  icon: Icon,
+  label,
+  detail,
+  trailing,
+  onClick,
+  to,
+  tone,
+}: {
+  icon?: LucideIcon;
+  label: ReactNode;
+  detail?: ReactNode;
+  trailing?: ReactNode;
+  onClick?: () => void;
+  to?: "/import";
+  tone?: "danger";
+}) {
+  const body = (
+    <>
+      {Icon && (
+        <Icon
+          size={19}
+          strokeWidth={1.75}
+          className={cn(
+            "shrink-0 self-start mt-px",
+            tone === "danger" ? "text-danger" : "text-zinc-400",
+          )}
+        />
+      )}
+      <span className="flex-1 min-w-0">
+        <span
+          className={cn(
+            "block text-[15px] truncate",
+            tone === "danger" ? "text-danger" : "text-zinc-100",
+          )}
+        >
+          {label}
+        </span>
+        {detail && (
+          <span className="block mt-0.5 text-xs leading-relaxed text-zinc-500">
+            {detail}
+          </span>
+        )}
+      </span>
+      {to ? <ChevronRight size={16} className="text-zinc-600" /> : trailing}
+    </>
+  );
+  const cls = cn(
+    "w-full flex items-center gap-3.5 px-4 py-3.5 text-left min-h-[52px]",
+    (onClick || to) && "hover:bg-white/[0.03] active:bg-white/[0.05] transition-colors",
+    tone === "danger" && "text-danger",
+  );
+  if (to) {
+    return (
+      <Link to={to} className={cls}>
+        {body}
+      </Link>
+    );
+  }
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={cls}>
+        {body}
+      </button>
+    );
+  }
+  return <div className={cls}>{body}</div>;
 }

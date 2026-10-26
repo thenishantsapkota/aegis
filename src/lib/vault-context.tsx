@@ -16,6 +16,7 @@ import {
   importRawVaultKey,
   makeKeyCheck,
   newKdfParams,
+  toSessionKey,
   verifyKeyCheck,
   type EncryptedBlob,
 } from "./crypto";
@@ -97,6 +98,9 @@ type VaultCtx = {
   pullNow: () => Promise<boolean>;
   /** Decrypt and return the secret for one entry. */
   decryptEntry: (entry: EntryRecord) => Promise<EntrySecret>;
+  // The already-decrypted secret for an entry, if this session has one. Lets
+  // a remounting code row render its code on the first frame.
+  peekSecret: (entry: EntryRecord | TeamEntryRecord) => EntrySecret | undefined;
   /** Decrypt all entries (for export). */
   decryptAll: (entries: EntryRecord[]) => Promise<Map<string, EntrySecret>>;
 
@@ -141,11 +145,16 @@ type VaultCtx = {
 
 const Ctx = createContext<VaultCtx | null>(null);
 
-// Stay unlocked for 1 hour after the most recent unlock (across foreground +
-// background). After that, lock — user must re-authenticate.
+// Stay unlocked for 1 hour after the most recent unlock (across foreground,
+// background and page reloads). After that, lock and re-authenticate.
 const AUTO_LOCK_MS = 60 * 60 * 1000;
 const AUTO_SYNC_INTERVAL_MS = 60 * 60 * 1000; // hourly background push
 const AUTO_SYNC_DEBOUNCE_MS = 2_000; // 2s after a save → push
+
+// An edit bumps updatedAt, so a changed entry never reads a stale secret.
+function secretCacheKey(entry: EntryRecord | TeamEntryRecord) {
+  return `${"teamId" in entry ? "t" : "p"}:${entry.id}:${entry.updatedAt}`;
+}
 
 function lockedState(meta: VaultMeta | null): VaultState {
   if (!meta) return { status: "uninitialized" };
@@ -171,6 +180,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // Team crypto held in memory only while unlocked.
   const privateKeyRef = useRef<CryptoKey | null>(null);
   const teamKeysRef = useRef<Map<string, CryptoKey>>(new Map());
+  // Decrypted secrets for this unlock only, keyed by entry version. Wiped on
+  // lock alongside the keys.
+  const secretCacheRef = useRef<Map<string, EntrySecret>>(new Map());
   // Used by auto-sync — bumps on every saveEntry, debounce reads/clears it.
   const dirtyRef = useRef<number>(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -187,6 +199,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const meta = await getMeta();
         if (!mounted) return;
         metaRef.current = meta ?? null;
+        if (meta && (await resumeSession(meta))) return;
+        if (!mounted) return;
         setState(lockedState(meta ?? null));
       } catch (e) {
         console.error("Failed to load vault meta", e);
@@ -203,11 +217,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     keyRef.current = null;
     privateKeyRef.current = null;
     teamKeysRef.current = new Map();
+    secretCacheRef.current = new Map();
     unlockExpiresAtRef.current = null;
     if (autoLockTimerRef.current) {
       clearTimeout(autoLockTimerRef.current);
       autoLockTimerRef.current = null;
     }
+    void db().session.delete("session");
     setState((s) =>
       s.status === "unlocked"
         ? { status: "locked", email: s.email, hasBiometric: s.hasBiometric }
@@ -215,12 +231,30 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  // ---- mark unlocked for the next hour --------------------------------------
-  const startUnlockWindow = useCallback(() => {
-    unlockExpiresAtRef.current = Date.now() + AUTO_LOCK_MS;
-    if (autoLockTimerRef.current) clearTimeout(autoLockTimerRef.current);
-    autoLockTimerRef.current = setTimeout(doLock, AUTO_LOCK_MS);
-  }, [doLock]);
+  // ---- mark unlocked until a deadline ---------------------------------------
+  const armAutoLock = useCallback(
+    (expiresAt: number) => {
+      unlockExpiresAtRef.current = expiresAt;
+      if (autoLockTimerRef.current) clearTimeout(autoLockTimerRef.current);
+      autoLockTimerRef.current = setTimeout(doLock, expiresAt - Date.now());
+    },
+    [doLock],
+  );
+
+  // A fresh unlock opens a new one-hour window and persists the key for it,
+  // so reloading the page inside the window doesn't lock the vault.
+  const startUnlockWindow = useCallback(
+    (key: CryptoKey) => {
+      const expiresAt = Date.now() + AUTO_LOCK_MS;
+      armAutoLock(expiresAt);
+      void toSessionKey(key)
+        .then((sessionKey) =>
+          db().session.put({ id: "session", key: sessionKey, expiresAt }),
+        )
+        .catch((e) => console.warn("[session] persist failed:", e));
+    },
+    [armAutoLock],
+  );
 
   // ---- deadline check on focus/visibility ----------------------------------
   // setTimeout is throttled in background tabs (especially on mobile), so we
@@ -461,6 +495,33 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [ensureIdentityLocal, hydrateTeams, doCloudSync],
   );
 
+  // Resume an unlock session persisted by a previous page load, if it is still
+  // inside its window and the key still matches this vault.
+  const resumeSession = useCallback(
+    async (meta: VaultMeta): Promise<boolean> => {
+      try {
+        const session = await db().session.get("session");
+        if (!session) return false;
+        const valid =
+          session.expiresAt > Date.now() &&
+          (await verifyKeyCheck(session.key, meta.keyCheck));
+        if (!valid) {
+          await db().session.delete("session");
+          return false;
+        }
+        keyRef.current = session.key;
+        armAutoLock(session.expiresAt);
+        await afterUnlock(session.key);
+        setState(unlockedState(metaRef.current));
+        return true;
+      } catch (e) {
+        console.warn("[session] resume failed:", e);
+        return false;
+      }
+    },
+    [armAutoLock, afterUnlock],
+  );
+
   // ---- core actions ---------------------------------------------------------
 
   const initialize = useCallback(
@@ -484,7 +545,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       await db().meta.put(meta);
       metaRef.current = meta;
       keyRef.current = key;
-      startUnlockWindow();
+      startUnlockWindow(key);
       await afterUnlock(key);
       setState(unlockedState(metaRef.current));
     },
@@ -496,7 +557,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const { meta, vaultKey } = await cloudSignUpFresh(password, email);
       metaRef.current = meta;
       keyRef.current = vaultKey;
-      startUnlockWindow();
+      startUnlockWindow(vaultKey);
       await afterUnlock(vaultKey);
       setState(unlockedState(metaRef.current));
     },
@@ -512,7 +573,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const ok = await verifyKeyCheck(key, meta.keyCheck);
       if (!ok) return false;
       keyRef.current = key;
-      startUnlockWindow();
+      startUnlockWindow(key);
       await afterUnlock(key);
       setState(unlockedState(metaRef.current));
       return true;
@@ -529,11 +590,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const ok = await verifyKeyCheck(key, meta.keyCheck);
     if (!ok) {
       throw new Error(
-        "Biometric unlock returned a key that doesn't match this vault. The binding may be stale — disable and re-enable biometric.",
+        "Biometric unlock returned a key that doesn't match this vault. The binding may be stale. Disable and re-enable biometric.",
       );
     }
     keyRef.current = key;
-    startUnlockWindow();
+    startUnlockWindow(key);
     await afterUnlock(key);
     setState(unlockedState(metaRef.current));
     return true;
@@ -542,6 +603,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const enableBiometric = useCallback(async () => {
     if (!keyRef.current || !metaRef.current) {
       throw new Error("Vault must be unlocked to enroll biometric.");
+    }
+    // A key resumed after a reload is non-extractable, so it can't be wrapped.
+    if (!keyRef.current.extractable) {
+      throw new Error(
+        "Lock the vault and unlock it with your password, then turn this on.",
+      );
     }
     const raw = await exportRawVaultKey(keyRef.current);
     const binding: BiometricBinding = await createBiometricBinding({
@@ -587,6 +654,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     keyRef.current = null;
     privateKeyRef.current = null;
     teamKeysRef.current = new Map();
+    secretCacheRef.current = new Map();
     metaRef.current = null;
     await db().delete();
     setState({ status: "uninitialized" });
@@ -669,8 +737,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const decryptEntry = useCallback<VaultCtx["decryptEntry"]>(async (entry) => {
     if (!keyRef.current) throw new Error("Vault is locked");
-    return decryptJSON<EntrySecret>(keyRef.current, entry.payload);
+    const cacheKey = secretCacheKey(entry);
+    const cached = secretCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+    const secret = await decryptJSON<EntrySecret>(keyRef.current, entry.payload);
+    secretCacheRef.current.set(cacheKey, secret);
+    return secret;
   }, []);
+
+  const peekSecret = useCallback<VaultCtx["peekSecret"]>(
+    (entry) => secretCacheRef.current.get(secretCacheKey(entry)),
+    [],
+  );
 
   const decryptAll = useCallback<VaultCtx["decryptAll"]>(async (entries) => {
     if (!keyRef.current) throw new Error("Vault is locked");
@@ -688,7 +766,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const identity = await ensureIdentityLocal(keyRef.current);
     if (!identity) throw new Error("No vault on this device");
     if (!metaRef.current?.userId) {
-      throw new Error("Sign in to cloud sync first — teams require an account.");
+      throw new Error("Sign in to cloud sync first. Teams require an account.");
     }
     // Publishing must succeed here (teammates need our key).
     await publishPublicKey(identity);
@@ -834,7 +912,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     async (entry) => {
       const key = teamKeysRef.current.get(entry.teamId);
       if (!key) throw new Error("No key loaded for this team");
-      return decryptJSON<EntrySecret>(key, entry.payload);
+      const cacheKey = secretCacheKey(entry);
+      const cached = secretCacheRef.current.get(cacheKey);
+      if (cached) return cached;
+      const secret = await decryptJSON<EntrySecret>(key, entry.payload);
+      secretCacheRef.current.set(cacheKey, secret);
+      return secret;
     },
     [],
   );
@@ -856,6 +939,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       pushNow,
       pullNow,
       decryptEntry,
+      peekSecret,
       decryptAll,
       ensureIdentity,
       getPrivateKey,
@@ -885,6 +969,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       pushNow,
       pullNow,
       decryptEntry,
+      peekSecret,
       decryptAll,
       ensureIdentity,
       getPrivateKey,

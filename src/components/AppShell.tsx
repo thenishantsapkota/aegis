@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, Plus, Settings as SettingsIcon, RefreshCcw } from "lucide-react";
+import { KeyRound, Plus, Settings as SettingsIcon, RefreshCcw } from "lucide-react";
 import { cn } from "~/lib/cn";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -82,7 +82,7 @@ export function AppShell({
   const showIndicator = pull > 0 || refreshing;
 
   return (
-    <div className="pt-safe pl-safe pr-safe pb-32 relative">
+    <div className="pt-safe pl-safe pr-safe pb-24 relative">
       {onRefresh && (
         <div
           className="pointer-events-none fixed left-0 right-0 z-30 flex justify-center"
@@ -98,7 +98,6 @@ export function AppShell({
         >
           <span
             className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg-elev border border-border text-muted"
-            style={{ boxShadow: "0 8px 24px -8px rgb(0 0 0 / 0.5)" }}
           >
             <RefreshCcw
               size={16}
@@ -134,28 +133,22 @@ export function AppShell({
   );
 }
 
+// A plain docked tab bar: full width, hairline top edge, equal tabs. Add is a
+// normal tab rather than a floating action button.
 function BottomNav() {
   const { location } = useRouterState();
   const items = [
-    { to: "/", label: "Codes", icon: Home },
-    { to: "/add", label: "Add", icon: Plus, emphasized: true },
+    { to: "/", label: "Codes", icon: KeyRound },
+    { to: "/add", label: "Add", icon: Plus },
     { to: "/settings", label: "Settings", icon: SettingsIcon },
   ];
   return (
-    <div
-      className="fixed bottom-0 inset-x-0 z-40 pointer-events-none pb-safe"
-      style={{ paddingBottom: "max(0.75rem, var(--safe-bottom))" }}
+    <nav
+      className="fixed bottom-0 inset-x-0 z-40 bg-bg/95 backdrop-blur border-t border-white/[0.08]"
+      style={{ paddingBottom: "var(--safe-bottom)" }}
     >
-      <nav
-        className="pointer-events-auto mx-auto max-w-sm grid grid-cols-3 gap-1 p-1.5 rounded-full"
-        style={{
-          background: "rgb(15 19 32 / 0.92)",
-          border: "1px solid rgb(255 255 255 / 0.10)",
-          boxShadow:
-            "0 1px 0 rgb(255 255 255 / 0.06) inset, 0 24px 48px -16px rgb(0 0 0 / 0.6)",
-        }}
-      >
-        {items.map(({ to, label, icon: Icon, emphasized }) => {
+      <div className="mx-auto max-w-2xl grid grid-cols-3">
+        {items.map(({ to, label, icon: Icon }) => {
           const active =
             to === "/"
               ? location.pathname === "/"
@@ -165,43 +158,16 @@ function BottomNav() {
               key={to}
               to={to}
               className={cn(
-                "flex flex-col items-center justify-center gap-0.5 py-2 px-2 rounded-full text-[11px] font-medium transition-all duration-200",
-                emphasized
-                  ? ""
-                  : active
-                    ? "text-white"
-                    : "text-muted hover:text-white",
+                "flex flex-col items-center justify-center gap-1 pt-2.5 pb-2 text-[11px] font-medium transition-colors",
+                active ? "text-zinc-100" : "text-zinc-500 hover:text-zinc-300",
               )}
             >
-              {emphasized ? (
-                <span
-                  className="inline-flex items-center justify-center w-11 h-11 -my-1 rounded-full text-white"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, rgb(124 134 255) 0%, rgb(56 189 248) 100%)",
-                    boxShadow:
-                      "0 1px 0 rgb(255 255 255 / 0.2) inset, 0 10px 28px -6px rgb(124 134 255 / 0.55)",
-                  }}
-                >
-                  <Icon size={22} />
-                </span>
-              ) : (
-                <>
-                  <span
-                    className={cn(
-                      "inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors",
-                      active && "bg-white/10",
-                    )}
-                  >
-                    <Icon size={19} />
-                  </span>
-                  <span className="leading-none">{label}</span>
-                </>
-              )}
+              <Icon size={20} strokeWidth={active ? 2.25 : 1.75} />
+              {label}
             </Link>
           );
         })}
-      </nav>
-    </div>
+      </div>
+    </nav>
   );
 }

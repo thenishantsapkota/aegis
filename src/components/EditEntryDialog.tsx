@@ -194,7 +194,7 @@ export function EditEntryDialog({
           </h2>
           <button
             onClick={onClose}
-            className="w-9 h-9 rounded-2xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white"
+            className="w-9 h-9 rounded-xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-muted hover:text-white"
             aria-label="Close"
           >
             <X size={16} />

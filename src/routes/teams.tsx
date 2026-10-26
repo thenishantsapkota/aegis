@@ -114,21 +114,15 @@ function TeamsRoute() {
   return (
     <AppShell onRefresh={doRefresh}>
       <div className="pt-4">
-        <header className="flex items-center justify-between mb-5">
-          <Link
-            to="/"
-            className="w-10 h-10 rounded-xl bg-bg-elev border border-border flex items-center justify-center text-muted hover:text-white"
-            aria-label="Back"
-          >
-            <ArrowLeft size={18} />
+        <header className="flex items-center gap-1 -mx-2 mb-6">
+          <Link to="/" className="icon-btn" aria-label="Back">
+            <ArrowLeft size={20} />
           </Link>
-          <h1 className="text-lg font-semibold inline-flex items-center gap-2">
-            <Users size={18} /> Teams
-          </h1>
+          <h1 className="text-lg font-semibold flex-1">Teams</h1>
           <button
             onClick={doRefresh}
             disabled={refreshing || !cloudReady}
-            className="w-10 h-10 rounded-xl bg-bg-elev border border-border flex items-center justify-center text-muted hover:text-white disabled:opacity-40"
+            className="icon-btn disabled:opacity-40"
             aria-label="Refresh"
           >
             <RefreshCcw size={16} className={refreshing ? "animate-spin" : ""} />
@@ -395,7 +389,7 @@ function TeamDetail({
         <div className="text-xs text-warn flex items-start gap-2">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
           You don't have this team's key yet. An owner or admin needs to grant
-          you access — ask them to open Teams and pull to refresh, then pull
+          you access. Ask them to open Teams and pull to refresh, then pull
           again here.
         </div>
       )}
@@ -409,7 +403,7 @@ function TeamDetail({
       )}
 
       <div className="space-y-2">
-        <div className="text-xs uppercase tracking-wider text-muted">
+        <div className="text-sm font-medium text-muted">
           Members
         </div>
         {members === null ? (
@@ -485,7 +479,7 @@ function InviteRow({
 
   return (
     <form onSubmit={invite} className="space-y-2">
-      <div className="text-xs uppercase tracking-wider text-muted">
+      <div className="text-sm font-medium text-muted">
         Invite by email
       </div>
       <div className="flex gap-2">

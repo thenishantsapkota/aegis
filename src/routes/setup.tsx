@@ -1,14 +1,8 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import {
-  ShieldCheck,
-  KeyRound,
-  AlertTriangle,
-  Cloud,
-  CloudDownload,
-} from "lucide-react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { useVault } from "~/lib/vault-context";
 import { isAppwriteConfigured } from "~/lib/appwrite";
+import { AuthLayout, FooterLink, FormError } from "~/components/AuthLayout";
 
 export const Route = createFileRoute("/setup")({
   component: SetupRoute,
@@ -22,18 +16,18 @@ function SetupRoute() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Already have a vault: bounce. Redirect from an effect, not during render.
+  const hasVault = state.status !== "loading" && state.status !== "uninitialized";
+  useEffect(() => {
+    if (hasVault) navigate({ to: "/" });
+  }, [hasVault, navigate]);
+
   if (state.status === "loading") {
     return (
-      <div className="h-safe-screen flex items-center justify-center text-muted">
-        Loading…
-      </div>
+      <div className="h-safe-screen" aria-busy="true" />
     );
   }
-  if (state.status !== "uninitialized") {
-    // Already have a vault — bounce.
-    navigate({ to: "/" });
-    return null;
-  }
+  if (hasVault) return null;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -58,101 +52,64 @@ function SetupRoute() {
   }
 
   return (
-    <div className="h-safe-screen flex items-center justify-center px-4 pt-safe pb-safe">
-      <div className="w-full max-w-md card p-6 animate-fade-in">
-        <div className="flex items-center gap-3 mb-5">
-          <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-accent/15 text-accent">
-            <ShieldCheck size={22} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold">Create your vault</h1>
-            <p className="text-sm text-muted">
-              Codes are encrypted on this device.
-            </p>
-          </div>
+    <AuthLayout
+      title="Create your vault"
+      subtitle="Your codes are encrypted on this device with a master password."
+      footer={
+        isAppwriteConfigured() && (
+          <>
+            <FooterLink
+              text="Already use Aegis on another device?"
+              link="Sign in"
+              to="/restore"
+            />
+            <FooterLink
+              text="Want sync from the start?"
+              link="Create a cloud account"
+              to="/signup"
+            />
+          </>
+        )
+      }
+    >
+      <form onSubmit={onSubmit} className="space-y-5">
+        <div>
+          <label className="label" htmlFor="pw">Master password</label>
+          <input
+            id="pw"
+            type="password"
+            autoComplete="new-password"
+            autoFocus
+            className="input"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="At least 8 characters"
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="pw2">Confirm password</label>
+          <input
+            id="pw2"
+            type="password"
+            autoComplete="new-password"
+            className="input"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="label">Master password</label>
-            <input
-              type="password"
-              autoComplete="new-password"
-              autoFocus
-              className="input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 8 characters"
-            />
-          </div>
-          <div>
-            <label className="label">Confirm</label>
-            <input
-              type="password"
-              autoComplete="new-password"
-              className="input"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Repeat your password"
-            />
-          </div>
+        <p className="text-sm leading-relaxed text-zinc-400">
+          <span className="text-zinc-200">There's no password reset.</span> If
+          you forget it, these codes can't be recovered, so keep it in a
+          password manager.
+        </p>
 
-          {error && (
-            <div className="flex items-start gap-2 text-sm text-danger">
-              <AlertTriangle size={16} className="mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
+        {error && <FormError>{error}</FormError>}
 
-          <div className="rounded-xl bg-warn/10 border border-warn/30 p-3 text-xs text-warn flex gap-2">
-            <KeyRound size={16} className="mt-0.5 shrink-0" />
-            <span>
-              If you forget this password, your codes cannot be recovered. We
-              never see it. Save it in a password manager.
-            </span>
-          </div>
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="btn-primary w-full"
-          >
-            {busy ? "Creating vault…" : "Create vault"}
-          </button>
-        </form>
-
-        {isAppwriteConfigured() && (
-          <>
-            <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-[0.08em] text-muted">
-              <div className="flex-1 h-px bg-white/[0.08]" />
-              or
-              <div className="flex-1 h-px bg-white/[0.08]" />
-            </div>
-            <div className="space-y-2">
-              <Link
-                to="/signup"
-                className="btn-ghost w-full"
-                aria-label="Create cloud account"
-              >
-                <Cloud size={18} />
-                Create cloud account
-              </Link>
-              <Link
-                to="/restore"
-                className="btn-ghost w-full"
-                aria-label="Sign in to existing account"
-              >
-                <CloudDownload size={18} />
-                Sign in to existing account
-              </Link>
-            </div>
-            <p className="text-xs text-muted text-center mt-3">
-              Cloud account = sync across devices. Sign in to pull codes from
-              another device.
-            </p>
-          </>
-        )}
-      </div>
-    </div>
+        <button type="submit" disabled={busy} className="btn-primary w-full">
+          {busy ? "Creating vault…" : "Create vault"}
+        </button>
+      </form>
+    </AuthLayout>
   );
 }
